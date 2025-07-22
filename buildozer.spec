@@ -17,10 +17,19 @@ source.include_exts = py,png,jpg,kv,atlas,json,txt
 # (list) List of inclusions using pattern matching
 source.include_patterns = assets/*,data/*,*.py
 
+# (list) Source files to exclude (let empty to not exclude anything)
+source.exclude_exts = spec
+
+# (list) List of directory to exclude (let empty to not exclude anything)
+source.exclude_dirs = tests,bin,.buildozer,venv,__pycache__
+
+# (list) List of exclusions using pattern matching
+source.exclude_patterns = license,images/*,*.pyc,*~,*.bak,*.swp,*.tmp,.DS_Store,Thumbs.db,.git*,*/.*,README.md,*.md,docs/*
+
 # (str) Application versioning (method 1)
 version = 2.0.0
 
-# (list) Application requirements - FIXED: Added requests explicitly and proper formatting
+# (list) Application requirements
 requirements = python3,kivy==2.1.0,requests>=2.25.0,urllib3,pyjnius,android,plyer,pillow,certifi,charset-normalizer,idna
 
 # (str) Presplash of the application
@@ -42,11 +51,8 @@ fullscreen = 0
 # (string) Presplash background color (for android toolchain)
 android.presplash_color = #1E3A8A
 
-# (list) Permissions - FIXED: Removed problematic permissions
+# (list) Permissions
 android.permissions = INTERNET,ACCESS_NETWORK_STATE,ACCESS_WIFI_STATE,READ_CALL_LOG,READ_PHONE_STATE,READ_CONTACTS,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,WAKE_LOCK
-
-# (list) features - FIXED: Proper format for features
-android.features = android.hardware.telephony
 
 # (int) Target Android API, should be as high as possible.
 android.api = 34
@@ -70,19 +76,19 @@ android.skip_update = False
 android.accept_sdk_license = True
 
 # (str) Android app theme, default is ok for Kivy-based app
-android.apptheme = "@android:style/Theme.NoTitleBar"
+android.apptheme = @android:style/Theme.NoTitleBar
 
 # (bool) Enable AndroidX support
 android.enable_androidx = True
 
 # (list) add java compile options
-android.add_compile_options = "sourceCompatibility = 1.8", "targetCompatibility = 1.8"
+android.add_compile_options = sourceCompatibility = 1.8, targetCompatibility = 1.8
 
-# (list) Gradle repositories to add
-android.gradle_repositories = "google()", "mavenCentral()", "gradlePluginPortal()"
+# (list) Gradle repositories to add  
+android.gradle_repositories = google(), mavenCentral(), gradlePluginPortal()
 
-# (list) packaging options to add - FIXED: Added more exclusions for build issues
-android.add_packaging_options = "exclude 'META-INF/DEPENDENCIES'", "exclude 'META-INF/LICENSE'", "exclude 'META-INF/LICENSE.txt'", "exclude 'META-INF/NOTICE'", "exclude 'META-INF/NOTICE.txt'", "exclude 'META-INF/*.kotlin_module'", "exclude 'META-INF/common.kotlin_module'"
+# (list) packaging options to add
+android.add_packaging_options = exclude 'META-INF/DEPENDENCIES', exclude 'META-INF/LICENSE', exclude 'META-INF/LICENSE.txt', exclude 'META-INF/NOTICE', exclude 'META-INF/NOTICE.txt', exclude 'META-INF/*.kotlin_module', exclude 'META-INF/common.kotlin_module'
 
 # (str) launchMode to set for the main activity
 android.manifest.launch_mode = singleTop
@@ -137,46 +143,3 @@ build_dir = ./.buildozer
 
 # (str) Path to build output (i.e. .apk, .aab, .ipa) storage
 bin_dir = ./bin
-
-# Exclude unnecessary files from the build - FIXED: Added more exclusions
-[app:source.exclude_patterns]
-license
-*.pyc
-*.pyo
-*.git*
-*/__pycache__/*
-*/.*
-*~
-*.bak
-*.swp
-*.tmp
-.DS_Store
-Thumbs.db
-.buildozer/*
-bin/*
-venv/*
-env/*
-.env
-*.log
-tests/*
-test_*
-*_test.py
-README.md
-*.md
-docs/*
-# FIXED: Exclude problematic Python test files
-*/test/*
-*/tests/*
-**/test/**
-**/tests/**
-lib/python*/test/*
-lib/python*/tests/*
-
-# Development profile
-[app@dev]
-title = %(title)s (Dev)
-
-# Production profile
-[app@production]
-title = %(title)s
-android.release_artifact = aab
