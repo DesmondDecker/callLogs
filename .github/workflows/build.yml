@@ -41,6 +41,13 @@ jobs:
     
     - name: Setup Android SDK and NDK
       run: |
+        # Clean any existing Android setup to avoid conflicts
+        rm -rf $HOME/.buildozer/android/platform/android-sdk
+        rm -rf $HOME/.buildozer/android/platform/android-ndk*
+        
+        # Create directories
+        mkdir -p $HOME/.buildozer/android/platform
+        
         # Download and setup Android SDK
         wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
         unzip -q commandlinetools-linux-9477386_latest.zip
@@ -52,16 +59,19 @@ jobs:
         ln -s $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager $HOME/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager
         ln -s $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/avdmanager $HOME/.buildozer/android/platform/android-sdk/tools/bin/avdmanager
         
-        # Download and setup Android NDK 25b
+        # Download and setup Android NDK 25b (CRITICAL: Use NDK 25b, not older versions)
         wget -q https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
         unzip -q android-ndk-r25b-linux.zip
         mv android-ndk-r25b $HOME/.buildozer/android/platform/android-ndk-r25b
         
-        # Set environment variables
+        # Set environment variables - IMPORTANT: Point to the correct NDK version
         echo "ANDROIDSDK=$HOME/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
         echo "ANDROIDNDK=$HOME/.buildozer/android/platform/android-ndk-r25b" >> $GITHUB_ENV
         echo "ANDROIDAPI=33" >> $GITHUB_ENV
         echo "ANDROIDMINAPI=21" >> $GITHUB_ENV
+        
+        # Verify the NDK path exists
+        ls -la $HOME/.buildozer/android/platform/android-ndk-r25b
     
     - name: Build with Buildozer
       run: |
@@ -85,3 +95,5 @@ jobs:
         ls -la
         echo "Bin directory contents:"
         ls -la bin/ || echo "Bin directory not found"
+        echo "Android platform contents:"
+        ls -la $HOME/.buildozer/android/platform/ || echo "Platform directory not found"
