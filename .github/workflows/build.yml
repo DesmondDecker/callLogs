@@ -59,6 +59,20 @@ jobs:
         ln -s $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager $HOME/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager
         ln -s $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/avdmanager $HOME/.buildozer/android/platform/android-sdk/tools/bin/avdmanager
         
+        # Set environment variables
+        export ANDROID_SDK_ROOT=$HOME/.buildozer/android/platform/android-sdk
+        export ANDROID_HOME=$HOME/.buildozer/android/platform/android-sdk
+        
+        # Accept all Android SDK licenses automatically
+        yes | $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses --sdk_root=$HOME/.buildozer/android/platform/android-sdk
+        
+        # Install essential build-tools, platform-tools, and platforms
+        $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager --sdk_root=$HOME/.buildozer/android/platform/android-sdk \
+          "platform-tools" \
+          "build-tools;34.0.0" \
+          "platforms;android-33" \
+          "platforms;android-21"
+        
         # Download and setup Android NDK 25b (CRITICAL: Use NDK 25b, not older versions)
         wget -q https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
         unzip -q android-ndk-r25b-linux.zip
@@ -69,9 +83,18 @@ jobs:
         echo "ANDROIDNDK=$HOME/.buildozer/android/platform/android-ndk-r25b" >> $GITHUB_ENV
         echo "ANDROIDAPI=33" >> $GITHUB_ENV
         echo "ANDROIDMINAPI=21" >> $GITHUB_ENV
+        echo "ANDROID_SDK_ROOT=$HOME/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
+        echo "ANDROID_HOME=$HOME/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
         
-        # Verify the NDK path exists
-        ls -la $HOME/.buildozer/android/platform/android-ndk-r25b
+        # Verify installations
+        echo "Verifying SDK installation:"
+        ls -la $HOME/.buildozer/android/platform/android-sdk/
+        echo "Build-tools directory:"
+        ls -la $HOME/.buildozer/android/platform/android-sdk/build-tools/ || echo "Build-tools not found"
+        echo "Platform-tools directory:"
+        ls -la $HOME/.buildozer/android/platform/android-sdk/platform-tools/ || echo "Platform-tools not found"
+        echo "NDK directory:"
+        ls -la $HOME/.buildozer/android/platform/android-ndk-r25b/ || echo "NDK not found"
     
     - name: Build with Buildozer
       run: |
@@ -81,6 +104,8 @@ jobs:
         ANDROIDNDK: ${{ env.ANDROIDNDK }}
         ANDROIDAPI: ${{ env.ANDROIDAPI }}
         ANDROIDMINAPI: ${{ env.ANDROIDMINAPI }}
+        ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
+        ANDROID_HOME: ${{ env.ANDROID_HOME }}
         
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
@@ -97,3 +122,5 @@ jobs:
         ls -la bin/ || echo "Bin directory not found"
         echo "Android platform contents:"
         ls -la $HOME/.buildozer/android/platform/ || echo "Platform directory not found"
+        echo "SDK build-tools contents:"
+        ls -la $HOME/.buildozer/android/platform/android-sdk/build-tools/ || echo "Build-tools directory not found"
