@@ -1,617 +1,675 @@
-#!/usr/bin/env python3
-"""
-Android Call Log Monitor
-Captures call logs from Android device and sends them to web platform
-"""
+# main.py - Complete production-ready main application
 
+import os
+import sys
 import json
 import time
 import threading
-import uuid
-from datetime import datetime
-from typing import Dict, List, Optional
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+from typing import Optional
 
 # Kivy imports
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.button import Button
-from kivy.uix.textinput import TextInput
-from kivy.uix.switch import Switch
 from kivy.uix.popup import Popup
+from kivy.uix.progressbar import ProgressBar
 from kivy.uix.scrollview import ScrollView
-from kivy.uix.gridlayout import GridLayout
+from kivy.uix.textinput import TextInput
 from kivy.clock import Clock
 from kivy.logger import Logger
-from kivy.storage.jsonstore import JsonStore
+from kivy.core.window import Window
 
-# Android-specific imports
+# Import our robust backend system
+from config import AppConfig, StorageManager, is_android, get_platform_name
+from backend_detector import BackendDetector
+
+# Call log handling imports
 try:
-    from android.permissions import request_permissions, Permission
-    from android.runnable import run_on_ui_thread
-    from jnius import autoclass, cast
-    from android.broadcast import BroadcastReceiver
-    ANDROID_AVAILABLE = True
+    if is_android():
+        from jnius import autoclass, cast
+        from android.permissions import request_permissions, Permission
+        from android import activity
+    else:
+        # Mock for desktop testing
+        class MockJnius:
+            @staticmethod
+            def autoclass(name):
+                return None
+        autoclass = MockJnius.autoclass
 except ImportError:
-    ANDROID_AVAILABLE = False
-    Logger.info("Android imports not available - running in desktop mode")
+    Logger.warning("Android modules not available - running in desktop mode")
 
-class CallLogMonitor:
+class CallLogManager:
+    """
+    Cross-platform call log manager
+    """
+    
     def __init__(self):
-        self.api_base_url = "https://kortahununited.onrender.com/api"
-        self.device_id = self._get_device_id()
-        self.user_id = ""
-        self.is_monitoring = False
-        self.last_sync_time = None
-        self.call_cache = []
-        self.device_registered = False
-        
-        # Setup requests session with retry strategy
-        self.session = requests.Session()
-        retry_strategy = Retry(
-            total=3,
-            backoff_factor=1,
-            status_forcelist=[429, 500, 502, 503, 504],
-        )
-        adapter = HTTPAdapter(max_retries=retry_strategy)
-        self.session.mount("http://", adapter)
-        self.session.mount("https://", adapter)
-        
-        # Load settings
-        self.store = JsonStore('call_monitor_settings.json')
-        self._load_settings()
-        
-    def _get_device_id(self) -> str:
-        """Generate or retrieve device ID"""
-        if ANDROID_AVAILABLE:
-            try:
-                # Try to get Android ID
-                PythonActivity = autoclass('org.kivy.android.PythonActivity')
-                context = PythonActivity.mActivity
-                resolver = context.getContentResolver()
-                Settings = autoclass('android.provider.Settings$Secure')
-                android_id = Settings.getString(resolver, 'android_id')
-                return f"android_{android_id}"
-            except Exception as e:
-                Logger.error(f"Error getting Android ID: {e}")
-        
-        # Fallback to UUID
-        return f"device_{str(uuid.uuid4())[:8]}"
+        self.permissions_granted = False
+        self.call_logs = []
     
-    def _load_settings(self):
-        """Load settings from storage"""
-        try:
-            if self.store.exists('user_id'):
-                self.user_id = self.store.get('user_id')['value']
-            if self.store.exists('api_url'):
-                self.api_base_url = self.store.get('api_url')['value']
-            if self.store.exists('last_sync'):
-                self.last_sync_time = self.store.get('last_sync')['value']
-        except Exception as e:
-            Logger.error(f"Error loading settings: {e}")
-    
-    def _save_settings(self):
-        """Save settings to storage"""
-        try:
-            self.store.put('user_id', value=self.user_id)
-            self.store.put('api_url', value=self.api_base_url)
-            if self.last_sync_time:
-                self.store.put('last_sync', value=self.last_sync_time)
-        except Exception as e:
-            Logger.error(f"Error saving settings: {e}")
-    
-    def get_device_info(self) -> Dict:
-        """Get device information"""
-        device_info = {
-            'model': 'Unknown',
-            'manufacturer': 'Unknown',
-            'os': 'Android',
-            'osVersion': 'Unknown',
-            'appVersion': '1.0.0'
-        }
-        
-        if ANDROID_AVAILABLE:
-            try:
-                Build = autoclass('android.os.Build')
-                device_info.update({
-                    'model': Build.MODEL,
-                    'manufacturer': Build.MANUFACTURER,
-                    'osVersion': Build.VERSION.RELEASE,
-                })
-            except Exception as e:
-                Logger.error(f"Error getting device info: {e}")
-        
-        return device_info
-    
-    def request_permissions(self) -> bool:
-        """Request necessary permissions"""
-        if not ANDROID_AVAILABLE:
+    def request_permissions(self):
+        """Request necessary Android permissions"""
+        if not is_android():
+            Logger.info("Desktop mode - permissions not needed")
+            self.permissions_granted = True
             return True
         
         try:
-            permissions = [
+            Logger.info("Requesting Android permissions...")
+            request_permissions([
                 Permission.READ_CALL_LOG,
                 Permission.READ_PHONE_STATE,
                 Permission.READ_CONTACTS,
                 Permission.INTERNET,
                 Permission.ACCESS_NETWORK_STATE
-            ]
-            
-            request_permissions(permissions)
-            Logger.info("Permissions requested")
+            ])
+            self.permissions_granted = True
+            Logger.info("Permissions requested successfully")
             return True
         except Exception as e:
-            Logger.error(f"Error requesting permissions: {e}")
+            Logger.error(f"Failed to request permissions: {e}")
+            self.permissions_granted = False
             return False
     
-    def register_device(self) -> bool:
-        """Register device with the backend"""
-        try:
-            device_info = self.get_device_info()
-            
-            payload = {
-                'deviceId': self.device_id,
-                'userId': self.user_id,
-                'deviceInfo': device_info,
-                'permissions': {
-                    'readCallLog': True,
-                    'readPhoneState': True,
-                    'readContacts': True
-                }
-            }
-            
-            response = self.session.post(
-                f"{self.api_base_url}/devices/register",
-                json=payload,
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                if data.get('success'):
-                    self.device_registered = True
-                    Logger.info("Device registered successfully")
-                    return True
-            
-            Logger.error(f"Device registration failed: {response.text}")
-            return False
-            
-        except Exception as e:
-            Logger.error(f"Error registering device: {e}")
-            return False
-    
-    def send_heartbeat(self) -> bool:
-        """Send heartbeat to keep device active"""
-        try:
-            payload = {'deviceId': self.device_id}
-            
-            response = self.session.post(
-                f"{self.api_base_url}/devices/heartbeat",
-                json=payload,
-                timeout=10
-            )
-            
-            return response.status_code == 200
-            
-        except Exception as e:
-            Logger.error(f"Error sending heartbeat: {e}")
-            return False
-    
-    def get_call_logs(self) -> List[Dict]:
-        """Get call logs from Android device"""
-        if not ANDROID_AVAILABLE:
-            # Return dummy data for testing
-            return [{
-                'number': '+1234567890',
-                'name': 'Test Contact',
-                'type': 'incoming',
-                'timestamp': datetime.now().isoformat(),
-                'duration': 120,
-                'date': datetime.now().isoformat()
-            }]
+    def get_call_logs(self, limit: int = 100):
+        """Get call logs from device"""
+        if not is_android():
+            # Return mock data for desktop testing
+            return self._get_mock_call_logs(limit)
+        
+        if not self.permissions_granted:
+            Logger.warning("Permissions not granted for call log access")
+            return []
         
         try:
-            # Get call log cursor
-            PythonActivity = autoclass('org.kivy.android.PythonActivity')
-            context = PythonActivity.mActivity
-            resolver = context.getContentResolver()
-            
-            # Call log columns
-            CallLog = autoclass('android.provider.CallLog$Calls')
-            
-            # Query call log
-            cursor = resolver.query(
-                CallLog.CONTENT_URI,
-                None,  # All columns
-                None,  # No selection
-                None,  # No selection args
-                f"{CallLog.DATE} DESC"  # Order by date descending
-            )
-            
-            calls = []
-            if cursor and cursor.moveToFirst():
-                while True:
-                    try:
-                        # Get call details
-                        number = cursor.getString(cursor.getColumnIndex(CallLog.NUMBER)) or "Unknown"
-                        name = cursor.getString(cursor.getColumnIndex(CallLog.CACHED_NAME)) or "Unknown"
-                        call_type = cursor.getInt(cursor.getColumnIndex(CallLog.TYPE))
-                        duration = cursor.getInt(cursor.getColumnIndex(CallLog.DURATION))
-                        date = cursor.getLong(cursor.getColumnIndex(CallLog.DATE))
-                        
-                        # Convert call type to string
-                        type_map = {
-                            1: 'incoming',
-                            2: 'outgoing',
-                            3: 'missed',
-                            4: 'voicemail',
-                            5: 'rejected',
-                            6: 'blocked'
-                        }
-                        
-                        call_type_str = type_map.get(call_type, 'unknown')
-                        
-                        # Convert timestamp
-                        timestamp = datetime.fromtimestamp(date / 1000).isoformat()
-                        
-                        call_data = {
-                            'number': number,
-                            'name': name,
-                            'type': call_type_str,
-                            'duration': duration,
-                            'timestamp': timestamp,
-                            'date': timestamp,
-                            'deviceId': self.device_id
-                        }
-                        
-                        calls.append(call_data)
-                        
-                    except Exception as e:
-                        Logger.error(f"Error processing call log entry: {e}")
-                        continue
-                    
-                    if not cursor.moveToNext():
-                        break
-            
-            if cursor:
-                cursor.close()
-            
-            Logger.info(f"Retrieved {len(calls)} call log entries")
-            return calls
-            
+            return self._get_android_call_logs(limit)
         except Exception as e:
-            Logger.error(f"Error getting call logs: {e}")
+            Logger.error(f"Failed to get call logs: {e}")
             return []
     
-    def filter_new_calls(self, calls: List[Dict]) -> List[Dict]:
-        """Filter calls that haven't been synced yet"""
-        if not self.last_sync_time:
-            return calls
+    def _get_mock_call_logs(self, limit: int):
+        """Generate mock call logs for testing"""
+        import random
         
-        try:
-            last_sync = datetime.fromisoformat(self.last_sync_time)
-            new_calls = []
-            
-            for call in calls:
-                call_time = datetime.fromisoformat(call['timestamp'])
-                if call_time > last_sync:
-                    new_calls.append(call)
-            
-            Logger.info(f"Found {len(new_calls)} new calls since last sync")
-            return new_calls
-            
-        except Exception as e:
-            Logger.error(f"Error filtering new calls: {e}")
-            return calls
+        mock_logs = []
+        for i in range(min(limit, 20)):
+            mock_logs.append({
+                'number': f'+1555000{i:04d}',
+                'name': f'Contact {i}',
+                'type': random.choice(['incoming', 'outgoing', 'missed']),
+                'duration': random.randint(0, 600),
+                'timestamp': int(time.time()) - random.randint(0, 86400 * 7),
+                'id': str(i)
+            })
+        
+        Logger.info(f"Generated {len(mock_logs)} mock call logs")
+        return mock_logs
     
-    def send_call_logs(self, calls: List[Dict]) -> bool:
-        """Send call logs to the backend"""
-        if not calls:
-            return True
-        
+    def _get_android_call_logs(self, limit: int):
+        """Get actual call logs from Android device"""
         try:
-            payload = {
-                'deviceId': self.device_id,
-                'userId': self.user_id,
-                'calls': calls
-            }
+            # Android call log access
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            context = PythonActivity.mActivity
+            ContentResolver = context.getContentResolver()
             
-            response = self.session.post(
-                f"{self.api_base_url}/calls/sync",
-                json=payload,
-                timeout=30
+            # Call log URI
+            CallLog = autoclass('android.provider.CallLog$Calls')
+            uri = CallLog.CONTENT_URI
+            
+            # Query columns
+            projection = [
+                CallLog.NUMBER,
+                CallLog.CACHED_NAME,
+                CallLog.TYPE,
+                CallLog.DURATION,
+                CallLog.DATE,
+                CallLog._ID
+            ]
+            
+            # Query call logs
+            cursor = ContentResolver.query(
+                uri,
+                projection,
+                None,
+                None,
+                f"{CallLog.DATE} DESC LIMIT {limit}"
             )
             
-            if response.status_code == 200:
-                data = response.json()
-                if data.get('success'):
-                    self.last_sync_time = datetime.now().isoformat()
-                    self._save_settings()
-                    Logger.info(f"Successfully synced {len(calls)} calls")
-                    return True
+            call_logs = []
+            if cursor and cursor.moveToFirst():
+                while not cursor.isAfterLast():
+                    call_log = {
+                        'number': cursor.getString(0) or 'Unknown',
+                        'name': cursor.getString(1) or 'Unknown',
+                        'type': self._get_call_type(cursor.getInt(2)),
+                        'duration': cursor.getInt(3),
+                        'timestamp': cursor.getLong(4) // 1000,  # Convert to seconds
+                        'id': cursor.getString(5)
+                    }
+                    call_logs.append(call_log)
+                    cursor.moveToNext()
+                
+                cursor.close()
             
-            Logger.error(f"Failed to sync calls: {response.text}")
-            return False
+            Logger.info(f"Retrieved {len(call_logs)} call logs")
+            return call_logs
             
         except Exception as e:
-            Logger.error(f"Error sending call logs: {e}")
-            return False
+            Logger.error(f"Failed to get Android call logs: {e}")
+            return []
     
-    def sync_call_logs(self) -> bool:
-        """Main sync function"""
-        try:
-            Logger.info("Starting call log sync...")
-            
-            # Get all call logs
-            all_calls = self.get_call_logs()
-            
-            # Filter new calls
-            new_calls = self.filter_new_calls(all_calls)
-            
-            if not new_calls:
-                Logger.info("No new calls to sync")
-                return True
-            
-            # Send to backend
-            success = self.send_call_logs(new_calls)
-            
-            if success:
-                Logger.info("Call log sync completed successfully")
-            else:
-                Logger.error("Call log sync failed")
-            
-            return success
-            
-        except Exception as e:
-            Logger.error(f"Error in sync_call_logs: {e}")
-            return False
+    def _get_call_type(self, call_type_int):
+        """Convert Android call type int to string"""
+        call_types = {
+            1: 'incoming',
+            2: 'outgoing',
+            3: 'missed'
+        }
+        return call_types.get(call_type_int, 'unknown')
 
-
-class CallLogApp(App):
-    def __init__(self):
-        super().__init__()
-        self.monitor = CallLogMonitor()
-        self.monitoring_thread = None
-        self.heartbeat_thread = None
-        self.is_running = False
+class KortahunApp(App):
+    """
+    Main application with robust backend connectivity
+    """
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.backend_detector = BackendDetector(timeout=15, max_retries=3)
+        self.call_log_manager = CallLogManager()
         
+        # Backend connection info
+        self.api_url = None
+        self.user_id = None
+        self.device_id = None
+        self.is_initialized = False
+        
+        # UI references
+        self.main_layout = None
+        self.status_label = None
+        self.progress_bar = None
+        self.init_button = None
+        self.sync_button = None
+        self.test_button = None
+        self.info_label = None
+        self.log_display = None
+        self.manual_url_input = None
+    
     def build(self):
-        """Build the UI"""
-        main_layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
+        """
+        Build the main UI
+        """
+        # Set window size for desktop testing
+        if not is_android():
+            Window.size = (400, 700)
+        
+        # Main layout
+        self.main_layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
         
         # Title
         title = Label(
-            text='Call Log Monitor',
-            size_hint_y=None,
-            height=50,
-            font_size='24sp'
+            text='Kortahun United\nCall Logger',
+            font_size='20sp',
+            size_hint_y=0.08,
+            color=(0.2, 0.6, 1, 1),  # Blue color
+            halign='center'
         )
-        main_layout.add_widget(title)
+        title.bind(size=title.setter('text_size'))
+        self.main_layout.add_widget(title)
         
-        # Settings section
-        settings_layout = GridLayout(cols=2, size_hint_y=None, height=200, spacing=10)
-        
-        # User ID input
-        settings_layout.add_widget(Label(text='User ID:', size_hint_x=0.3))
-        self.user_id_input = TextInput(
-            text=self.monitor.user_id,
-            multiline=False,
-            size_hint_x=0.7
-        )
-        self.user_id_input.bind(text=self.on_user_id_change)
-        settings_layout.add_widget(self.user_id_input)
-        
-        # API URL input
-        settings_layout.add_widget(Label(text='API URL:', size_hint_x=0.3))
-        self.api_url_input = TextInput(
-            text=self.monitor.api_base_url,
-            multiline=False,
-            size_hint_x=0.7
-        )
-        self.api_url_input.bind(text=self.on_api_url_change)
-        settings_layout.add_widget(self.api_url_input)
-        
-        # Auto-sync switch
-        settings_layout.add_widget(Label(text='Auto Sync:', size_hint_x=0.3))
-        self.auto_sync_switch = Switch(active=True, size_hint_x=0.7)
-        settings_layout.add_widget(self.auto_sync_switch)
-        
-        # Device ID display
-        settings_layout.add_widget(Label(text='Device ID:', size_hint_x=0.3))
-        settings_layout.add_widget(Label(text=self.monitor.device_id, size_hint_x=0.7))
-        
-        main_layout.add_widget(settings_layout)
-        
-        # Control buttons
-        button_layout = BoxLayout(size_hint_y=None, height=50, spacing=10)
-        
-        self.permissions_btn = Button(text='Request Permissions')
-        self.permissions_btn.bind(on_press=self.request_permissions)
-        button_layout.add_widget(self.permissions_btn)
-        
-        self.register_btn = Button(text='Register Device')
-        self.register_btn.bind(on_press=self.register_device)
-        button_layout.add_widget(self.register_btn)
-        
-        self.sync_btn = Button(text='Sync Now')
-        self.sync_btn.bind(on_press=self.sync_now)
-        button_layout.add_widget(self.sync_btn)
-        
-        main_layout.add_widget(button_layout)
-        
-        # Start/Stop button
-        self.start_stop_btn = Button(
-            text='Start Monitoring',
-            size_hint_y=None,
-            height=50
-        )
-        self.start_stop_btn.bind(on_press=self.toggle_monitoring)
-        main_layout.add_widget(self.start_stop_btn)
-        
-        # Status display
+        # Status label
         self.status_label = Label(
-            text='Status: Stopped',
-            size_hint_y=None,
-            height=30
-        )
-        main_layout.add_widget(self.status_label)
-        
-        # Log display
-        log_layout = BoxLayout(orientation='vertical', spacing=5)
-        log_layout.add_widget(Label(text='Log:', size_hint_y=None, height=30))
-        
-        self.log_display = Label(
-            text='App started. Configure settings and request permissions.',
+            text='Starting application...',
+            font_size='14sp',
+            size_hint_y=0.12,
             text_size=(None, None),
+            halign='center'
+        )
+        self.main_layout.add_widget(self.status_label)
+        
+        # Progress bar
+        self.progress_bar = ProgressBar(
+            max=100,
+            value=0,
+            size_hint_y=0.05
+        )
+        self.main_layout.add_widget(self.progress_bar)
+        
+        # Button layout
+        button_layout = BoxLayout(orientation='vertical', spacing=5, size_hint_y=0.25)
+        
+        # Initialize button
+        self.init_button = Button(
+            text='Initialize Backend',
+            size_hint_y=0.33,
+            background_color=(0.2, 0.8, 0.2, 1)  # Green
+        )
+        self.init_button.bind(on_press=self.initialize_backend)
+        button_layout.add_widget(self.init_button)
+        
+        # Sync button (initially disabled)
+        self.sync_button = Button(
+            text='Sync Call Logs',
+            size_hint_y=0.33,
+            background_color=(0.2, 0.6, 1, 1),  # Blue
+            disabled=True
+        )
+        self.sync_button.bind(on_press=self.sync_call_logs)
+        button_layout.add_widget(self.sync_button)
+        
+        # Test connectivity button
+        self.test_button = Button(
+            text='Test Connectivity',
+            size_hint_y=0.34,
+            background_color=(1, 0.6, 0.2, 1)  # Orange
+        )
+        self.test_button.bind(on_press=self.test_connectivity)
+        button_layout.add_widget(self.test_button)
+        
+        self.main_layout.add_widget(button_layout)
+        
+        # Manual URL input section
+        url_layout = BoxLayout(orientation='horizontal', size_hint_y=0.08, spacing=5)
+        
+        self.manual_url_input = TextInput(
+            text='https://kortahununited.onrender.com/api',
+            size_hint_x=0.7,
+            multiline=False,
+            font_size='12sp'
+        )
+        url_layout.add_widget(self.manual_url_input)
+        
+        manual_test_button = Button(
+            text='Test URL',
+            size_hint_x=0.3,
+            background_color=(0.8, 0.2, 0.8, 1)  # Purple
+        )
+        manual_test_button.bind(on_press=self.test_manual_url)
+        url_layout.add_widget(manual_test_button)
+        
+        self.main_layout.add_widget(url_layout)
+        
+        # Info display with scroll
+        scroll = ScrollView(size_hint_y=0.42)
+        
+        self.info_label = Label(
+            text=self.get_initial_info(),
+            font_size='12sp',
+            text_size=(Window.width - 60, None),
             halign='left',
-            valign='top'
+            valign='top',
+            size_hint_y=None
         )
+        self.info_label.bind(texture_size=self.info_label.setter('size'))
         
-        scroll = ScrollView()
-        scroll.add_widget(self.log_display)
-        log_layout.add_widget(scroll)
+        scroll.add_widget(self.info_label)
+        self.main_layout.add_widget(scroll)
         
-        main_layout.add_widget(log_layout)
+        # Start initialization automatically
+        Clock.schedule_once(self.auto_initialize, 2)
         
-        # Schedule status updates
-        Clock.schedule_interval(self.update_status, 1)
+        return self.main_layout
+    
+    def get_initial_info(self):
+        """Get initial app information"""
+        device_info = AppConfig.get_device_info()
+        api_urls = AppConfig.get_api_urls()
         
-        return main_layout
-    
-    def on_user_id_change(self, instance, value):
-        """Handle user ID change"""
-        self.monitor.user_id = value
-        self.monitor._save_settings()
-    
-    def on_api_url_change(self, instance, value):
-        """Handle API URL change"""
-        self.monitor.api_base_url = value
-        self.monitor._save_settings()
-    
-    def request_permissions(self, instance):
-        """Request Android permissions"""
-        self.log_message("Requesting permissions...")
-        success = self.monitor.request_permissions()
-        if success:
-            self.log_message("Permissions requested successfully")
-        else:
-            self.log_message("Failed to request permissions")
-    
-    def register_device(self, instance):
-        """Register device with backend"""
-        if not self.monitor.user_id:
-            self.show_popup("Error", "Please enter a User ID first")
-            return
-        
-        self.log_message("Registering device...")
-        success = self.monitor.register_device()
-        if success:
-            self.log_message("Device registered successfully")
-        else:
-            self.log_message("Failed to register device")
-    
-    def sync_now(self, instance):
-        """Trigger immediate sync"""
-        self.log_message("Starting manual sync...")
-        threading.Thread(target=self._sync_thread, daemon=True).start()
-    
-    def _sync_thread(self):
-        """Sync in background thread"""
-        success = self.monitor.sync_call_logs()
-        message = "Sync completed successfully" if success else "Sync failed"
-        Clock.schedule_once(lambda dt: self.log_message(message), 0)
-    
-    def toggle_monitoring(self, instance):
-        """Start/stop monitoring"""
-        if self.is_running:
-            self.stop_monitoring()
-        else:
-            self.start_monitoring()
-    
-    def start_monitoring(self):
-        """Start background monitoring"""
-        if not self.monitor.user_id:
-            self.show_popup("Error", "Please enter a User ID first")
-            return
-        
-        if not self.monitor.device_registered:
-            self.show_popup("Error", "Please register device first")
-            return
-        
-        self.is_running = True
-        self.start_stop_btn.text = 'Stop Monitoring'
-        self.log_message("Starting monitoring...")
-        
-        # Start monitoring thread
-        self.monitoring_thread = threading.Thread(target=self._monitoring_loop, daemon=True)
-        self.monitoring_thread.start()
-        
-        # Start heartbeat thread
-        self.heartbeat_thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
-        self.heartbeat_thread.start()
-    
-    def stop_monitoring(self):
-        """Stop background monitoring"""
-        self.is_running = False
-        self.start_stop_btn.text = 'Start Monitoring'
-        self.log_message("Monitoring stopped")
-    
-    def _monitoring_loop(self):
-        """Main monitoring loop"""
-        while self.is_running:
-            try:
-                if self.auto_sync_switch.active:
-                    self.monitor.sync_call_logs()
-                time.sleep(300)  # 5 minutes
-            except Exception as e:
-                Logger.error(f"Error in monitoring loop: {e}")
-                time.sleep(60)  # Wait 1 minute before retrying
-    
-    def _heartbeat_loop(self):
-        """Heartbeat loop to keep device active"""
-        while self.is_running:
-            try:
-                self.monitor.send_heartbeat()
-                time.sleep(60)  # 1 minute
-            except Exception as e:
-                Logger.error(f"Error in heartbeat loop: {e}")
-                time.sleep(60)
-    
-    def update_status(self, dt):
-        """Update status display"""
-        if self.is_running:
-            self.status_label.text = f'Status: Running (Device: {self.monitor.device_id})'
-        else:
-            self.status_label.text = 'Status: Stopped'
-    
-    def log_message(self, message):
-        """Add message to log display"""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        log_entry = f"[{timestamp}] {message}"
-        
-        current_text = self.log_display.text
-        new_text = f"{current_text}\n{log_entry}"
-        
-        # Keep only last 20 lines
-        lines = new_text.split('\n')
-        if len(lines) > 20:
-            lines = lines[-20:]
-        
-        self.log_display.text = '\n'.join(lines)
-        Logger.info(message)
-    
-    def show_popup(self, title, message):
-        """Show popup message"""
-        popup = Popup(
-            title=title,
-            content=Label(text=message),
-            size_hint=(0.8, 0.4)
-        )
-        popup.open()
+        info_text = f"""Platform: {get_platform_name()}
+Android: {is_android()}
+Environment: {"Development" if AppConfig.is_development_environment() else "Production"}
 
+Device Info:
+• Model: {device_info.get('model', 'Unknown')}
+• OS: {device_info.get('os', 'Unknown')} {device_info.get('osVersion', '')}
+• Platform: {device_info.get('platform', 'Unknown')}
+
+API URLs to test:
+{chr(10).join(['• ' + url for url in api_urls[:3]])}
+
+Status: Ready to initialize...
+"""
+        return info_text
+    
+    def update_status(self, message: str, progress: int = None):
+        """Update status label and progress bar"""
+        Logger.info(f"[Status] {message}")
+        def update_ui(dt):
+            self.status_label.text = message
+            if progress is not None:
+                self.progress_bar.value = progress
+        Clock.schedule_once(update_ui, 0)
+    
+    def update_info_display(self, additional_info: str = None):
+        """Update the info display"""
+        config = self.backend_detector.get_saved_config()
+        
+        base_info = self.get_initial_info()
+        
+        if config:
+            config_info = f"""
+Current Configuration:
+• API URL: {config.get('api_url', 'Not set')}
+• User ID: {config.get('user_id', 'Not set')[:12]}...
+• Device ID: {config.get('device_id', 'Not set')[:16]}...
+• Registered: {config.get('device_registered', 'No')}
+• Last Registration: {time.ctime(int(config.get('last_registration', 0))) if config.get('last_registration') else 'Never'}
+"""
+            base_info += config_info
+        
+        if additional_info:
+            base_info += f"\n{additional_info}"
+        
+        def update_ui(dt):
+            self.info_label.text = base_info
+            self.info_label.text_size = (Window.width - 60, None)
+        Clock.schedule_once(update_ui, 0)
+    
+    def auto_initialize(self, dt):
+        """Auto-initialize the backend on app start"""
+        self.update_status("🚀 Auto-initializing...", 10)
+        
+        # Request permissions first on Android
+        if is_android():
+            self.call_log_manager.request_permissions()
+        
+        # Start initialization in a separate thread
+        threading.Thread(target=self.do_initialize, daemon=True).start()
+    
+    def initialize_backend(self, instance):
+        """Initialize backend connection (button handler)"""
+        self.init_button.disabled = True
+        threading.Thread(target=self.do_initialize, daemon=True).start()
+    
+    def do_initialize(self):
+        """Perform initialization in background thread"""
+        try:
+            self.update_status("🔍 Detecting backend...", 20)
+            self.update_info_display()
+            
+            self.update_status("🌐 Testing connectivity...", 30)
+            
+            # Test connectivity first
+            if not self.backend_detector.test_connectivity():
+                self.update_status("❌ No internet connectivity", 0)
+                self.show_error_popup("No Internet", "Please check your internet connection and try again.")
+                Clock.schedule_once(lambda dt: setattr(self.init_button, 'disabled', False), 0)
+                return
+            
+            self.update_status("🔍 Detecting backend servers...", 50)
+            
+            # Detect backend
+            self.api_url = self.backend_detector.detect_backend()
+            if not self.api_url:
+                self.update_status("❌ Backend detection failed", 0)
+                self.show_error_popup("Backend Error", 
+                    "Could not connect to any backend servers.\n\n"
+                    "Please check:\n"
+                    "• Internet connection\n"
+                    "• Server availability\n"
+                    "• Try the manual URL option")
+                Clock.schedule_once(lambda dt: setattr(self.init_button, 'disabled', False), 0)
+                return
+            
+            self.update_status("📱 Registering device...", 70)
+            
+            # Register device
+            if not self.backend_detector.register_device(self.api_url):
+                self.update_status("❌ Device registration failed", 0)
+                self.show_error_popup("Registration Error", 
+                    f"Failed to register device with backend.\n\n"
+                    f"Backend URL: {self.api_url}\n"
+                    f"Please check server logs or try manual URL.")
+                Clock.schedule_once(lambda dt: setattr(self.init_button, 'disabled', False), 0)
+                return
+            
+            # Success!
+            self.update_status("✅ Initialization successful!", 100)
+            
+            # Load configuration
+            config = self.backend_detector.get_saved_config()
+            if config:
+                self.user_id = config['user_id']
+                self.device_id = config['device_id']
+                self.is_initialized = True
+                
+                # Enable sync button
+                Clock.schedule_once(lambda dt: setattr(self.sync_button, 'disabled', False), 0)
+                
+                self.update_info_display("🎉 Device successfully registered and ready!")
+                
+                # Show success popup
+                self.show_success_popup("Success!", 
+                    f"✅ Backend connected: {self.api_url}\n"
+                    f"📱 Device registered successfully\n"
+                    f"🔄 Ready to sync call logs!")
+            
+        except Exception as e:
+            Logger.error(f"Initialization error: {e}")
+            self.update_status(f"❌ Initialization error: {str(e)}", 0)
+            self.show_error_popup("Initialization Error", f"An error occurred during initialization:\n\n{str(e)}")
+        
+        finally:
+            Clock.schedule_once(lambda dt: setattr(self.init_button, 'disabled', False), 0)
+    
+    def test_connectivity(self, instance):
+        """Test connectivity (button handler)"""
+        self.test_button.disabled = True
+        threading.Thread(target=self.do_test_connectivity, daemon=True).start()
+    
+    def do_test_connectivity(self):
+        """Test connectivity in background thread"""
+        try:
+            self.update_status("🧪 Testing connectivity...", 20)
+            
+            if self.backend_detector.test_connectivity():
+                self.update_status("✅ Connectivity test passed", 100)
+                self.show_success_popup("Connectivity Test", "✅ Internet connectivity is working!")
+            else:
+                self.update_status("❌ Connectivity test failed", 0)
+                self.show_error_popup("Connectivity Test", "❌ Internet connectivity issues detected.")
+        
+        except Exception as e:
+            Logger.error(f"Connectivity test error: {e}")
+            self.update_status(f"❌ Connectivity test error", 0)
+            self.show_error_popup("Test Error", f"Connectivity test failed:\n\n{str(e)}")
+        
+        finally:
+            Clock.schedule_once(lambda dt: setattr(self.test_button, 'disabled', False), 0)
+    
+    def test_manual_url(self, instance):
+        """Test manually entered URL"""
+        manual_url = self.manual_url_input.text.strip()
+        if not manual_url:
+            self.show_error_popup("Invalid URL", "Please enter a valid URL")
+            return
+        
+        instance.disabled = True
+        threading.Thread(target=lambda: self.do_test_manual_url(manual_url, instance), daemon=True).start()
+    
+    def do_test_manual_url(self, test_url: str, button_instance):
+        """Test manual URL in background thread"""
+        try:
+            self.update_status(f"🧪 Testing manual URL...", 50)
+            
+            is_available, api_info = self.backend_detector.test_backend_url(test_url)
+            
+            if is_available:
+                self.update_status("✅ Manual URL test passed", 100)
+                
+                # Ask if user wants to use this URL
+                def use_url(dt):
+                    popup_layout = BoxLayout(orientation='vertical', spacing=10, padding=20)
+                    popup_layout.add_widget(Label(text=f"✅ URL is working!\n\n{test_url}\n\nUse this URL for backend?", 
+                                                text_size=(300, None), halign='center'))
+                    
+                    button_layout = BoxLayout(orientation='horizontal', spacing=10, size_hint_y=0.3)
+                    
+                    yes_button = Button(text='Yes, Use This URL', background_color=(0.2, 0.8, 0.2, 1))
+                    no_button = Button(text='Cancel', background_color=(0.8, 0.2, 0.2, 1))
+                    
+                    button_layout.add_widget(yes_button)
+                    button_layout.add_widget(no_button)
+                    popup_layout.add_widget(button_layout)
+                    
+                    popup = Popup(title='Manual URL Test Success', content=popup_layout, size_hint=(0.9, 0.4))
+                    
+                    def use_manual_url(btn):
+                        popup.dismiss()
+                        # Save manual URL and register
+                        StorageManager.save('api_url', test_url)
+                        self.api_url = test_url
+                        threading.Thread(target=lambda: self.backend_detector.register_device(test_url), daemon=True).start()
+                    
+                    def cancel(btn):
+                        popup.dismiss()
+                    
+                    yes_button.bind(on_press=use_manual_url)
+                    no_button.bind(on_press=cancel)
+                    popup.open()
+                
+                Clock.schedule_once(use_url, 0)
+                
+            else:
+                self.update_status("❌ Manual URL test failed", 0)
+                self.show_error_popup("Manual URL Test", f"❌ URL is not responding or not our API:\n\n{test_url}")
+        
+        except Exception as e:
+            Logger.error(f"Manual URL test error: {e}")
+            self.update_status("❌ Manual URL test error", 0)
+            self.show_error_popup("Test Error", f"Manual URL test failed:\n\n{str(e)}")
+        
+        finally:
+            Clock.schedule_once(lambda dt: setattr(button_instance, 'disabled', False), 0)
+    
+    def sync_call_logs(self, instance):
+        """Sync call logs to backend"""
+        if not self.is_initialized or not self.api_url:
+            self.show_error_popup("Not Initialized", "Please initialize backend connection first.")
+            return
+        
+        self.sync_button.disabled = True
+        threading.Thread(target=self.do_sync_call_logs, daemon=True).start()
+    
+    def do_sync_call_logs(self):
+        """Sync call logs in background thread"""
+        try:
+            self.update_status("📞 Reading call logs...", 20)
+            
+            # Get call logs
+            call_logs = self.call_log_manager.get_call_logs(100)
+            
+            if not call_logs:
+                self.update_status("⚠️ No call logs found", 50)
+                self.show_error_popup("No Call Logs", "No call logs found or permission denied.")
+                return
+            
+            self.update_status(f"📤 Uploading {len(call_logs)} call logs...", 60)
+            
+            # Prepare sync data
+            sync_data = {
+                'deviceId': self.device_id,
+                'userId': self.user_id,
+                'callLogs': call_logs,
+                'timestamp': int(time.time())
+            }
+            
+            # Send to backend
+            import requests
+            from urllib.parse import urljoin
+            
+            sync_url = urljoin(self.api_url.rstrip('/') + '/', 'calllogs/sync')
+            
+            response = requests.post(
+                sync_url,
+                json=sync_data,
+                timeout=30,
+                headers={
+                    'Content-Type': 'application/json',
+                    'User-Agent': f'KortahunUnited/2.0.0 ({get_platform_name()})'
+                }
+            )
+            
+            if response.status_code == 200:
+                response_data = response.json()
+                if response_data.get('success'):
+                    self.update_status(f"✅ Synced {len(call_logs)} call logs", 100)
+                    self.show_success_popup("Sync Success", 
+                        f"✅ Successfully synced {len(call_logs)} call logs!\n\n"
+                        f"Uploaded at: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                    
+                    # Save last sync time
+                    StorageManager.save('last_sync', str(int(time.time())))
+                    self.update_info_display(f"Last sync: {len(call_logs)} logs at {time.strftime('%H:%M:%S')}")
+                else:
+                    raise Exception(response_data.get('message', 'Sync failed'))
+            else:
+                raise Exception(f"Server error: {response.status_code}")
+        
+        except Exception as e:
+            Logger.error(f"Sync error: {e}")
+            self.update_status("❌ Call log sync failed", 0)
+            self.show_error_popup("Sync Error", f"Failed to sync call logs:\n\n{str(e)}")
+        
+        finally:
+            Clock.schedule_once(lambda dt: setattr(self.sync_button, 'disabled', False), 0)
+    
+    def show_error_popup(self, title: str, message: str):
+        """Show error popup"""
+        def show_popup(dt):
+            popup_layout = BoxLayout(orientation='vertical', spacing=10, padding=20)
+            popup_layout.add_widget(Label(text=message, text_size=(300, None), halign='center'))
+            
+            close_button = Button(text='Close', size_hint_y=0.3, background_color=(0.8, 0.2, 0.2, 1))
+            popup_layout.add_widget(close_button)
+            
+            popup = Popup(title=title, content=popup_layout, size_hint=(0.9, 0.5))
+            close_button.bind(on_press=popup.dismiss)
+            popup.open()
+        
+        Clock.schedule_once(show_popup, 0)
+    
+    def show_success_popup(self, title: str, message: str):
+        """Show success popup"""
+        def show_popup(dt):
+            popup_layout = BoxLayout(orientation='vertical', spacing=10, padding=20)
+            popup_layout.add_widget(Label(text=message, text_size=(300, None), halign='center'))
+            
+            close_button = Button(text='Great!', size_hint_y=0.3, background_color=(0.2, 0.8, 0.2, 1))
+            popup_layout.add_widget(close_button)
+            
+            popup = Popup(title=title, content=popup_layout, size_hint=(0.9, 0.5))
+            close_button.bind(on_press=popup.dismiss)
+            popup.open()
+        
+        Clock.schedule_once(show_popup, 0)
+
+# Main app execution
+def main():
+    """Main application entry point"""
+    try:
+        # Set up logging
+        import logging
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        
+        Logger.info("🚀 Starting Kortahun United Call Logger")
+        Logger.info(f"Platform: {get_platform_name()}")
+        Logger.info(f"Android: {is_android()}")
+        Logger.info(f"Environment: {'Development' if AppConfig.is_development_environment() else 'Production'}")
+        
+        # Create and run app
+        app = KortahunApp()
+        app.run()
+        
+    except Exception as e:
+        Logger.error(f"App startup error: {e}")
+        print(f"❌ Failed to start app: {e}")
+        sys.exit(1)
 
 if __name__ == '__main__':
-    CallLogApp().run()
+    main()

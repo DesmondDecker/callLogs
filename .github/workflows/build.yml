@@ -24,13 +24,13 @@ jobs:
       uses: actions/cache@v3
       with:
         path: .buildozer_global
-        key: buildozer-global-${{ hashFiles('buildozer.spec') }}-v3
+        key: buildozer-global-${{ hashFiles('buildozer.spec') }}-v4
     
     - name: Cache Buildozer directory
       uses: actions/cache@v3
       with:
         path: .buildozer
-        key: buildozer-${{ hashFiles('buildozer.spec') }}-v3
+        key: buildozer-${{ hashFiles('buildozer.spec') }}-v4
     
     - name: Install system dependencies
       run: |
@@ -58,12 +58,6 @@ jobs:
           wget \
           curl \
           llvm \
-          libffi-dev \
-          libssl-dev \
-          zlib1g-dev \
-          libbz2-dev \
-          libreadline-dev \
-          libsqlite3-dev \
           tk-dev \
           libpng-dev \
           libfreetype6-dev
@@ -159,55 +153,387 @@ jobs:
         # Test sdkmanager works
         $HOME/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager --version
     
-    - name: Create buildozer.spec if missing
+    - name: Create required Python files if missing
+      run: |
+        # Create config.py if missing (required by backend_detector.py)
+        if [ ! -f "config.py" ]; then
+          echo "Creating config.py..."
+          cat > config.py << 'EOF'
+        # config.py - Application configuration
+        
+        import platform
+        import uuid
+        import os
+        import json
+        from typing import Optional, List, Dict
+        
+        # Check if we're running on Android
+        def is_android() -> bool:
+            """Check if running on Android platform"""
+            try:
+                import jnius
+                return True
+            except ImportError:
+                return platform.system().lower() == 'android'
+        
+        def get_platform_name() -> str:
+            """Get current platform name"""
+            if is_android():
+                return "Android"
+            return platform.system()
+        
+        class AppConfig:
+            """Application configuration and constants"""
+            
+            APP_NAME = "Kortahun United Call Logger"
+            VERSION = "2.0.0"
+            
+            # Backend URLs to test (production, staging, development)
+            API_URLS = [
+                "https://kortahun-api.herokuapp.com",
+                "https://kortahun-backend.onrender.com",
+                "https://api.kortahununited.com",
+                "http://192.168.1.100:3000",  # Local development
+                "http://localhost:3000"       # Development fallback
+            ]
+            
+            # Connectivity test URLs
+            CONNECTIVITY_TEST_URLS = [
+                "https://www.google.com",
+                "https://httpbin.org/status/200",
+                "https://jsonplaceholder.typicode.com/posts/1"
+            ]
+            
+            @classmethod
+            def get_api_urls(cls) -> List[str]:
+                """Get list of API URLs to test"""
+                return cls.API_URLS.copy()
+            
+            @classmethod
+            def get_device_info(cls) -> Dict:
+                """Get device information"""
+                return {
+                    "platform": get_platform_name(),
+                    "version": cls.VERSION,
+                    "app_name": cls.APP_NAME,
+                    "python_version": platform.python_version(),
+                    "architecture": platform.machine()
+                }
+            
+            @classmethod
+            def get_user_id(cls) -> str:
+                """Get or generate user ID"""
+                user_id = StorageManager.load('user_id')
+                if not user_id:
+                    user_id = f"user_{uuid.uuid4().hex[:8]}"
+                    StorageManager.save('user_id', user_id)
+                return user_id
+            
+            @classmethod
+            def generate_device_id(cls) -> str:
+                """Generate unique device ID"""
+                device_id = StorageManager.load('device_id')
+                if not device_id:
+                    device_id = f"device_{uuid.uuid4().hex[:12]}"
+                    StorageManager.save('device_id', device_id)
+                return device_id
+        
+        class StorageManager:
+            """Simple file-based storage manager"""
+            
+            STORAGE_DIR = ".kortahun_data"
+            
+            @classmethod
+            def _ensure_storage_dir(cls):
+                """Ensure storage directory exists"""
+                if not os.path.exists(cls.STORAGE_DIR):
+                    os.makedirs(cls.STORAGE_DIR, exist_ok=True)
+            
+            @classmethod
+            def save(cls, key: str, value: str) -> bool:
+                """Save a key-value pair"""
+                try:
+                    cls._ensure_storage_dir()
+                    file_path = os.path.join(cls.STORAGE_DIR, f"{key}.txt")
+                    with open(file_path, 'w') as f:
+                        f.write(value)
+                    return True
+                except Exception as e:
+                    print(f"Storage save error: {e}")
+                    return False
+            
+            @classmethod
+            def load(cls, key: str) -> Optional[str]:
+                """Load a value by key"""
+                try:
+                    file_path = os.path.join(cls.STORAGE_DIR, f"{key}.txt")
+                    if os.path.exists(file_path):
+                        with open(file_path, 'r') as f:
+                            return f.read().strip()
+                except Exception as e:
+                    print(f"Storage load error: {e}")
+                return None
+            
+            @classmethod
+            def save_json(cls, key: str, data: dict) -> bool:
+                """Save JSON data"""
+                try:
+                    cls._ensure_storage_dir()
+                    file_path = os.path.join(cls.STORAGE_DIR, f"{key}.json")
+                    with open(file_path, 'w') as f:
+                        json.dump(data, f, indent=2)
+                    return True
+                except Exception as e:
+                    print(f"JSON save error: {e}")
+                    return False
+            
+            @classmethod
+            def load_json(cls, key: str) -> Optional[dict]:
+                """Load JSON data"""
+                try:
+                    file_path = os.path.join(cls.STORAGE_DIR, f"{key}.json")
+                    if os.path.exists(file_path):
+                        with open(file_path, 'r') as f:
+                            return json.load(f)
+                except Exception as e:
+                    print(f"JSON load error: {e}")
+                return None
+        EOF
+        fi
+        
+        # Create main.py if missing (basic Kivy app structure)
+        if [ ! -f "main.py" ]; then
+          echo "Creating main.py..."
+          cat > main.py << 'EOF'
+        # main.py - Kortahun United Call Logger Main Application
+        
+        import kivy
+        kivy.require('2.1.0')
+        
+        from kivy.app import App
+        from kivy.uix.boxlayout import BoxLayout
+        from kivy.uix.label import Label
+        from kivy.uix.button import Button
+        from kivy.clock import Clock
+        from kivy.logger import Logger
+        
+        from backend_detector import initialize_backend
+        from config import AppConfig, is_android
+        
+        class MainWidget(BoxLayout):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                self.orientation = 'vertical'
+                self.padding = 20
+                self.spacing = 10
+                
+                # Title
+                title = Label(
+                    text=AppConfig.APP_NAME,
+                    font_size=24,
+                    size_hint_y=None,
+                    height=60
+                )
+                self.add_widget(title)
+                
+                # Status label
+                self.status_label = Label(
+                    text="Initializing...",
+                    font_size=16,
+                    text_size=(None, None)
+                )
+                self.add_widget(self.status_label)
+                
+                # Initialize backend button
+                init_button = Button(
+                    text="Initialize Backend",
+                    size_hint_y=None,
+                    height=50
+                )
+                init_button.bind(on_press=self.initialize_backend)
+                self.add_widget(init_button)
+                
+                # Initialize on startup
+                Clock.schedule_once(self.auto_initialize, 1.0)
+            
+            def auto_initialize(self, dt):
+                """Auto-initialize backend on startup"""
+                self.initialize_backend(None)
+            
+            def initialize_backend(self, instance):
+                """Initialize backend connection"""
+                self.status_label.text = "Connecting to backend..."
+                
+                def init_callback(dt):
+                    try:
+                        success = initialize_backend()
+                        if success:
+                            self.status_label.text = "✅ Backend connected successfully!\n\nReady to log calls."
+                        else:
+                            self.status_label.text = "❌ Backend connection failed.\n\nPlease check your internet connection and try again."
+                    except Exception as e:
+                        self.status_label.text = f"❌ Initialization error:\n{str(e)}"
+                        Logger.error(f"Backend initialization error: {e}")
+                
+                # Run initialization in background
+                Clock.schedule_once(init_callback, 0.1)
+        
+        class KortahunUnitedsApp(App):
+            def build(self):
+                self.title = AppConfig.APP_NAME
+                return MainWidget()
+        
+        if __name__ == '__main__':
+            app = KortahunUnitedsApp()
+            app.run()
+        EOF
+        fi
+    
+    - name: Verify required files
+      run: |
+        echo "=== Checking required files ==="
+        
+        # Check for essential Python files
+        required_files=(
+          "main.py"
+          "backend_detector.py" 
+          "config.py"
+          "icon.png"
+          "presplash.png"
+        )
+        
+        missing_files=()
+        for file in "${required_files[@]}"; do
+          if [ -f "$file" ]; then
+            echo "✅ $file exists"
+            # Show file size for images
+            if [[ "$file" == *.png ]]; then
+              ls -lh "$file"
+            fi
+          else
+            echo "❌ $file missing"
+            missing_files+=("$file")
+          fi
+        done
+        
+        # Fail if critical files are missing
+        if [ ${#missing_files[@]} -gt 0 ]; then
+          echo "❌ Missing required files: ${missing_files[*]}"
+          echo "Please ensure all required files are in your repository."
+          exit 1
+        fi
+        
+        echo "=== Python file validation ==="
+        # Basic syntax check for Python files
+        python3 -m py_compile main.py
+        python3 -m py_compile backend_detector.py
+        python3 -m py_compile config.py
+        
+        echo "✅ All Python files have valid syntax"
+    
+    - name: Create buildozer.spec
       run: |
         if [ ! -f "buildozer.spec" ]; then
           echo "Creating buildozer.spec..."
           cat > buildozer.spec << 'EOF'
         [app]
-        title = Call Log Monitor
-        package.name = calllogmonitor
-        package.domain = com.example
+        title = Kortahun United Call Logger
+        package.name = kortahuncalllogger
+        package.domain = com.kortahununited
         source.dir = .
-        source.include_exts = py,png,jpg,kv,atlas
-        version = 0.1
-        requirements = python3,kivy==2.1.0,requests,pyjnius,android,urllib3,plyer
+        source.include_exts = py,png,jpg,kv,atlas,json,txt
+        source.include_patterns = assets/*,data/*
+        version = 2.0.0
+        requirements = python3,kivy==2.1.0,requests,urllib3,pyjnius,android,plyer,pillow
+        
+        # Application settings
+        fullscreen = 0
+        orientation = portrait
+        
+        # Icons and splash (using existing files)
+        icon.filename = %(source.dir)s/icon.png
+        presplash.filename = %(source.dir)s/presplash.png
         
         [buildozer]
         log_level = 2
         
-        [app]
-        presplash.filename = %(source.dir)s/presplash.png
-        icon.filename = %(source.dir)s/icon.png
-        
         [android]
-        permissions = INTERNET,READ_CALL_LOG,READ_PHONE_STATE,READ_CONTACTS,ACCESS_NETWORK_STATE
+        # Comprehensive permissions for call logging and networking
+        permissions = INTERNET,READ_CALL_LOG,READ_PHONE_STATE,READ_CONTACTS,ACCESS_NETWORK_STATE,ACCESS_WIFI_STATE,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
+        
+        # Android API settings
         api = 33
         minapi = 21
         ndk = 25b
         accept_sdk_license = True
         
-        [android.gradle_dependencies]
+        # Build configuration
+        gradle_dependencies = 
+        java_src_dirs = 
+        p4a_dir_whitelist = 
         
-        [android.java_src_dirs]
+        # Bootstrap for better compatibility
+        bootstrap = sdl2
         
-        [android.p4a_dir_whitelist]
+        # Explicit permission declarations
+        android.add_permissions = android.permission.READ_CALL_LOG,android.permission.READ_PHONE_STATE,android.permission.READ_CONTACTS,android.permission.INTERNET,android.permission.ACCESS_NETWORK_STATE
         
-        [android.add_src]
+        # Build artifacts
+        android.release_artifact = aab
+        android.debug_artifact = apk
         
-        [android.add_aars]
-        
-        [android.add_jars]
-        
-        [android.add_gradle_repositories]
-        
-        [android.add_gradle_dependencies]
+        # Optimize for backend connectivity
+        android.allow_backup = True
+        android.network_security_config = True
         EOF
+        else
+          echo "Using existing buildozer.spec"
         fi
+        
+        echo "=== Buildozer Configuration ==="
+        cat buildozer.spec
+    
+    - name: Verify project structure and dependencies
+      run: |
+        echo "=== Final Project Structure ==="
+        ls -la
+        
+        echo "=== Python Dependencies Test ==="
+        python3 -c "
+        print('Testing Python imports...')
+        
+        try:
+            import kivy
+            print(f'✅ Kivy: {kivy.__version__}')
+        except ImportError as e:
+            print(f'❌ Kivy import failed: {e}')
+            
+        try:
+            import requests
+            print(f'✅ Requests: {requests.__version__}')
+        except ImportError as e:
+            print(f'❌ Requests import failed: {e}')
+        
+        # Test backend detector import
+        try:
+            from backend_detector import BackendDetector
+            print('✅ Backend detector imports successfully')
+        except ImportError as e:
+            print(f'❌ Backend detector import failed: {e}')
+        
+        # Test config import
+        try:
+            from config import AppConfig, StorageManager
+            print('✅ Config imports successfully')
+        except ImportError as e:
+            print(f'❌ Config import failed: {e}')
+        
+        print('✅ All dependency tests completed')
+        "
     
     - name: Build with Buildozer
       run: |
-        # Set environment variables
+        # Set comprehensive environment variables
         export PYTHONUNBUFFERED=1
         export ANDROIDAPI=33
         export ANDROIDMINAPI=21
@@ -218,34 +544,100 @@ jobs:
         export ANDROID_NDK_HOME=$HOME/.buildozer/android/platform/android-ndk-r25b
         export PATH=$PATH:$ANDROIDSDK/platform-tools:$ANDROIDSDK/tools/bin:$ANDROIDSDK/cmdline-tools/latest/bin
         
+        echo "=== Environment Variables ==="
+        env | grep -E "(ANDROID|JAVA|PYTHON)" | sort
+        
+        echo "=== Starting Build Process ==="
+        
         # Clean previous builds
         buildozer android clean || true
         
-        # Build debug APK
+        # Build debug APK with verbose output
+        echo "Building Android APK..."
         buildozer android debug --verbose
+        
+        echo "=== Build Completed ==="
+        
+        # Verify APK was created
+        if [ -f "bin/"*.apk ]; then
+            echo "✅ APK build successful!"
+            ls -lh bin/*.apk
+        else
+            echo "❌ No APK found in bin/ directory"
+            ls -la bin/ || echo "bin/ directory not found"
+            exit 1
+        fi
         
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
       with:
-        name: call-log-monitor-apk
+        name: kortahun-call-logger-apk
         path: bin/*.apk
+        retention-days: 30
+        
+    - name: Upload build logs on success
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs-success
+        path: |
+          .buildozer/android/platform/build-**/logs/
+          .buildozer/android/platform/python-for-android/dist/*/build.log
+        retention-days: 7
+        if-no-files-found: ignore
         
     - name: Debug information on failure
       if: failure()
       run: |
-        echo "=== Autotools verification ==="
+        echo "=== Build Failure Debug Information ==="
+        
+        echo "=== Project Structure ==="
+        ls -la
+        
+        echo "=== Python Files Content Check ==="
+        wc -l *.py 2>/dev/null || echo "No Python files found"
+        
+        echo "=== Backend Detector Verification ==="
+        python3 -c "
+        try:
+            from backend_detector import BackendDetector
+            print('✅ BackendDetector can be imported')
+        except Exception as e:
+            print(f'❌ BackendDetector import error: {e}')
+        " || echo "Failed to test backend detector"
+        
+        echo "=== Autotools Verification ==="
         which libtoolize || echo "libtoolize not found"
         which autoreconf || echo "autoreconf not found"
         ls -la /usr/share/aclocal/lt*.m4 || echo "No libtool m4 files found"
         
-        echo "=== Build directory contents ==="
-        ls -la
+        echo "=== Buildozer Directory Structure ==="
+        find .buildozer -type d -maxdepth 3 2>/dev/null || echo "No .buildozer directory"
         
-        echo "=== Buildozer directory ==="
-        ls -la .buildozer/ || echo "No .buildozer directory"
+        echo "=== Build Logs (last 100 lines each) ==="
+        find .buildozer -name "*.log" -type f -exec echo "=== {} ===" \; -exec tail -100 {} \; 2>/dev/null || echo "No log files found"
         
-        echo "=== Python-for-android build log (last 50 lines) ==="
-        find .buildozer -name "*.log" -exec tail -50 {} \; || echo "No log files found"
+        echo "=== Buildozer State ==="
+        ls -la .buildozer/state/ 2>/dev/null || echo "No buildozer state directory"
         
-        echo "=== Environment variables ==="
-        env | grep -E "(ANDROID|JAVA)" | sort
+        echo "=== Environment Variables ==="
+        env | grep -E "(ANDROID|JAVA|PYTHON)" | sort
+        
+        echo "=== System Resources ==="
+        echo "Disk space:"
+        df -h
+        echo "Memory usage:"
+        free -h
+        
+    - name: Upload build logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs-failure
+        path: |
+          .buildozer/
+          buildozer.spec
+          *.log
+          *.py
+        retention-days: 14
+        if-no-files-found: ignore
