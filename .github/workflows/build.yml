@@ -24,18 +24,26 @@ jobs:
       uses: actions/cache@v3
       with:
         path: .buildozer_global
-        key: buildozer-global-${{ hashFiles('buildozer.spec') }}
+        key: buildozer-global-${{ hashFiles('buildozer.spec') }}-v2
     
     - name: Cache Buildozer directory
       uses: actions/cache@v3
       with:
         path: .buildozer
-        key: buildozer-${{ hashFiles('buildozer.spec') }}
+        key: buildozer-${{ hashFiles('buildozer.spec') }}-v2
+    
+    - name: Clean potential corrupted autotools cache
+      run: |
+        # Remove any cached autotools files that might be corrupted
+        sudo rm -rf /usr/share/aclocal/lt*.m4 || true
+        sudo apt-get install --reinstall libtool-bin automake autoconf || true
     
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y git zip unzip openjdk-17-jdk python3-pip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev cmake libffi-dev libssl-dev
+        sudo apt-get install -y git zip unzip openjdk-17-jdk python3-pip autoconf automake libtool libtool-bin pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev cmake libffi-dev libssl-dev m4 build-essential
+        # Update autotools to latest versions
+        sudo apt-get install -y autotools-dev gettext-base
         pip3 install --upgrade pip
         pip3 install buildozer cython==0.29.33
     
@@ -98,6 +106,10 @@ jobs:
     
     - name: Build with Buildozer
       run: |
+        # Clean any previous failed builds
+        buildozer android clean || true
+        # Force regenerate autotools files
+        export PYTHONUNBUFFERED=1
         buildozer android debug
       env:
         ANDROIDSDK: ${{ env.ANDROIDSDK }}
