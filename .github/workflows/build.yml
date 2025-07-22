@@ -32,12 +32,42 @@ jobs:
         path: .buildozer
         key: buildozer-${{ hashFiles('buildozer.spec') }}
     
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y git zip unzip openjdk-17-jdk python3-pip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
+        pip3 install --upgrade pip
+        pip3 install buildozer cython==0.29.33
+    
+    - name: Setup Android SDK and NDK
+      run: |
+        # Download and setup Android SDK
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        unzip -q commandlinetools-linux-9477386_latest.zip
+        mkdir -p $HOME/.buildozer/android/platform
+        mv cmdline-tools $HOME/.buildozer/android/platform/android-sdk
+        mkdir -p $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest
+        mv $HOME/.buildozer/android/platform/android-sdk/* $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/
+        
+        # Download and setup Android NDK 25b
+        wget -q https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
+        unzip -q android-ndk-r25b-linux.zip
+        mv android-ndk-r25b $HOME/.buildozer/android/platform/android-ndk-r25b
+        
+        # Set environment variables
+        echo "ANDROIDSDK=$HOME/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
+        echo "ANDROIDNDK=$HOME/.buildozer/android/platform/android-ndk-r25b" >> $GITHUB_ENV
+        echo "ANDROIDAPI=33" >> $GITHUB_ENV
+        echo "ANDROIDMINAPI=21" >> $GITHUB_ENV
+    
     - name: Build with Buildozer
-      uses: ArtemSBulgakov/buildozer-action@v1
-      id: buildozer
-      with:
-        command: buildozer android debug
-        buildozer_version: master
+      run: |
+        buildozer android debug
+      env:
+        ANDROIDSDK: ${{ env.ANDROIDSDK }}
+        ANDROIDNDK: ${{ env.ANDROIDNDK }}
+        ANDROIDAPI: ${{ env.ANDROIDAPI }}
+        ANDROIDMINAPI: ${{ env.ANDROIDMINAPI }}
         
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
