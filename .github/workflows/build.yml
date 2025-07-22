@@ -145,6 +145,20 @@ jobs:
         echo "NDK verification:"
         ls -la $HOME/.buildozer/android/platform/android-ndk-r25b/toolchains/
     
+    - name: Create symlinks for SDK compatibility
+      run: |
+        # Create symlinks for tools that expect the old SDK structure
+        mkdir -p $HOME/.buildozer/android/platform/android-sdk/tools/bin
+        ln -sf $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager $HOME/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager
+        ln -sf $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/avdmanager $HOME/.buildozer/android/platform/android-sdk/tools/bin/avdmanager
+        
+        # Verify symlinks
+        echo "Verifying sdkmanager symlink:"
+        ls -la $HOME/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager
+        
+        # Test sdkmanager works
+        $HOME/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager --version
+    
     - name: Create buildozer.spec if missing
       run: |
         if [ ! -f "buildozer.spec" ]; then
