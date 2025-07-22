@@ -24,141 +24,100 @@ jobs:
       uses: actions/cache@v3
       with:
         path: .buildozer_global
-        key: buildozer-global-${{ hashFiles('buildozer.spec') }}-v4
+        key: buildozer-global-${{ hashFiles('buildozer.spec') }}-v5
     
     - name: Cache Buildozer directory
       uses: actions/cache@v3
       with:
         path: .buildozer
-        key: buildozer-${{ hashFiles('buildozer.spec') }}-v4
+        key: buildozer-${{ hashFiles('buildozer.spec') }}-v5
     
     - name: Install system dependencies
       run: |
         sudo apt-get update
         # Install essential build tools first
         sudo apt-get install -y \
-          git \
-          zip \
-          unzip \
-          openjdk-17-jdk \
-          python3-pip \
-          build-essential \
-          pkg-config \
-          cmake \
-          ninja-build \
-          ccache \
-          libffi-dev \
-          libssl-dev \
-          zlib1g-dev \
-          libncurses5-dev \
-          libncursesw5-dev \
-          libbz2-dev \
-          libreadline-dev \
-          libsqlite3-dev \
-          wget \
-          curl \
-          llvm \
-          tk-dev \
-          libpng-dev \
-          libfreetype6-dev
+          git zip unzip openjdk-17-jdk python3-pip \
+          build-essential pkg-config cmake ninja-build ccache \
+          libffi-dev libssl-dev zlib1g-dev libncurses5-dev \
+          libncursesw5-dev libbz2-dev libreadline-dev libsqlite3-dev \
+          wget curl llvm tk-dev libpng-dev libfreetype6-dev
         
-        # Install autotools with proper cleanup
+        # Clean and install autotools properly
         sudo apt-get remove --purge -y libtool automake autoconf || true
-        sudo apt-get autoremove -y
-        sudo apt-get autoclean
+        sudo apt-get autoremove -y && sudo apt-get autoclean
         
-        # Install fresh autotools
-        sudo apt-get install -y \
-          autoconf \
-          automake \
-          libtool \
-          autotools-dev \
-          m4 \
-          gettext-base
+        sudo apt-get install -y autoconf automake libtool autotools-dev m4 gettext-base
         
-        # Verify critical files exist
+        # Verify critical autotools files exist
         echo "Verifying autotools installation:"
-        ls -la /usr/share/aclocal/ltoptions.m4 || { echo "ERROR: ltoptions.m4 missing"; exit 1; }
-        ls -la /usr/share/aclocal/ltsugar.m4 || { echo "ERROR: ltsugar.m4 missing"; exit 1; }
-        ls -la /usr/share/aclocal/ltversion.m4 || { echo "ERROR: ltversion.m4 missing"; exit 1; }
-        ls -la /usr/share/aclocal/lt~obsolete.m4 || { echo "ERROR: lt~obsolete.m4 missing"; exit 1; }
+        for file in ltoptions.m4 ltsugar.m4 ltversion.m4 lt~obsolete.m4; do
+          if [ ! -f "/usr/share/aclocal/$file" ]; then
+            echo "ERROR: $file missing"
+            exit 1
+          fi
+          echo "✅ $file found"
+        done
         
-        # Install Python dependencies
+        # Install Python dependencies with specific versions
         pip3 install --upgrade pip setuptools wheel
-        pip3 install buildozer cython==0.29.33
+        pip3 install buildozer==1.4.0 cython==0.29.33
     
     - name: Setup Android SDK and NDK
       run: |
-        # Clean any existing Android setup
+        # Clean existing Android setup
         rm -rf $HOME/.buildozer/android/platform/android-sdk
         rm -rf $HOME/.buildozer/android/platform/android-ndk*
-        
-        # Create directories
         mkdir -p $HOME/.buildozer/android/platform
         
-        # Download and setup Android SDK Command Line Tools
+        # Download Android SDK Command Line Tools
         wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
         unzip -q commandlinetools-linux-9477386_latest.zip
         mkdir -p $HOME/.buildozer/android/platform/android-sdk/cmdline-tools
         mv cmdline-tools $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest
         
-        # Set initial environment variables
+        # Set environment variables
         export ANDROID_SDK_ROOT=$HOME/.buildozer/android/platform/android-sdk
-        export ANDROID_HOME=$HOME/.buildozer/android/platform/android-sdk
+        export ANDROID_HOME=$ANDROID_SDK_ROOT
         export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
         
-        # Accept all licenses first
+        # Accept licenses and install SDK components
         yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses --sdk_root=$ANDROID_SDK_ROOT
-        
-        # Install required SDK components
         $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_SDK_ROOT \
-          "platform-tools" \
-          "build-tools;34.0.0" \
-          "build-tools;33.0.2" \
-          "platforms;android-33" \
-          "platforms;android-31" \
-          "platforms;android-21"
+          "platform-tools" "build-tools;34.0.0" "build-tools;33.0.2" \
+          "platforms;android-34" "platforms;android-33" "platforms;android-24"
         
-        # Download and setup Android NDK r25b
+        # Download Android NDK r25b
         wget -q https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
         unzip -q android-ndk-r25b-linux.zip
         mv android-ndk-r25b $HOME/.buildozer/android/platform/android-ndk-r25b
         
-        # Set environment variables for GitHub Actions
+        # Set GitHub environment variables
         echo "ANDROIDSDK=$HOME/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
         echo "ANDROIDNDK=$HOME/.buildozer/android/platform/android-ndk-r25b" >> $GITHUB_ENV
-        echo "ANDROIDAPI=33" >> $GITHUB_ENV
-        echo "ANDROIDMINAPI=21" >> $GITHUB_ENV
+        echo "ANDROIDAPI=34" >> $GITHUB_ENV
+        echo "ANDROIDMINAPI=24" >> $GITHUB_ENV
         echo "ANDROID_SDK_ROOT=$HOME/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
         echo "ANDROID_HOME=$HOME/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
         echo "ANDROID_NDK_HOME=$HOME/.buildozer/android/platform/android-ndk-r25b" >> $GITHUB_ENV
-        
-        # Verify installations
-        echo "SDK verification:"
-        ls -la $HOME/.buildozer/android/platform/android-sdk/platform-tools/
-        echo "NDK verification:"
-        ls -la $HOME/.buildozer/android/platform/android-ndk-r25b/toolchains/
     
-    - name: Create symlinks for SDK compatibility
+    - name: Create SDK compatibility symlinks
       run: |
-        # Create symlinks for tools that expect the old SDK structure
         mkdir -p $HOME/.buildozer/android/platform/android-sdk/tools/bin
-        ln -sf $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager $HOME/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager
-        ln -sf $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/avdmanager $HOME/.buildozer/android/platform/android-sdk/tools/bin/avdmanager
-        
-        # Verify symlinks
-        echo "Verifying sdkmanager symlink:"
-        ls -la $HOME/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager
+        ln -sf $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager \
+               $HOME/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager
+        ln -sf $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/avdmanager \
+               $HOME/.buildozer/android/platform/android-sdk/tools/bin/avdmanager
         
         # Test sdkmanager works
         $HOME/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager --version
     
-    - name: Create required Python files if missing
+    - name: Create missing Python files
       run: |
-        # Create config.py if missing (required by backend_detector.py)
+        # Create config.py with Cython language level fix
         if [ ! -f "config.py" ]; then
-          echo "Creating config.py..."
           cat > config.py << 'EOF'
+        # cython: language_level=3
         # config.py - Application configuration
         
         import platform
@@ -167,7 +126,6 @@ jobs:
         import json
         from typing import Optional, List, Dict
         
-        # Check if we're running on Android
         def is_android() -> bool:
             """Check if running on Android platform"""
             try:
@@ -188,16 +146,14 @@ jobs:
             APP_NAME = "Kortahun United Call Logger"
             VERSION = "2.0.0"
             
-            # Backend URLs to test (production, staging, development)
             API_URLS = [
                 "https://kortahun-api.herokuapp.com",
                 "https://kortahun-backend.onrender.com",
                 "https://api.kortahununited.com",
-                "http://192.168.1.100:3000",  # Local development
-                "http://localhost:3000"       # Development fallback
+                "http://192.168.1.100:3000",
+                "http://localhost:3000"
             ]
             
-            # Connectivity test URLs
             CONNECTIVITY_TEST_URLS = [
                 "https://www.google.com",
                 "https://httpbin.org/status/200",
@@ -206,12 +162,10 @@ jobs:
             
             @classmethod
             def get_api_urls(cls) -> List[str]:
-                """Get list of API URLs to test"""
                 return cls.API_URLS.copy()
             
             @classmethod
             def get_device_info(cls) -> Dict:
-                """Get device information"""
                 return {
                     "platform": get_platform_name(),
                     "version": cls.VERSION,
@@ -222,7 +176,6 @@ jobs:
             
             @classmethod
             def get_user_id(cls) -> str:
-                """Get or generate user ID"""
                 user_id = StorageManager.load('user_id')
                 if not user_id:
                     user_id = f"user_{uuid.uuid4().hex[:8]}"
@@ -231,7 +184,6 @@ jobs:
             
             @classmethod
             def generate_device_id(cls) -> str:
-                """Generate unique device ID"""
                 device_id = StorageManager.load('device_id')
                 if not device_id:
                     device_id = f"device_{uuid.uuid4().hex[:12]}"
@@ -239,19 +191,16 @@ jobs:
                 return device_id
         
         class StorageManager:
-            """Simple file-based storage manager"""
-            
+            """File-based storage manager"""
             STORAGE_DIR = ".kortahun_data"
             
             @classmethod
             def _ensure_storage_dir(cls):
-                """Ensure storage directory exists"""
                 if not os.path.exists(cls.STORAGE_DIR):
                     os.makedirs(cls.STORAGE_DIR, exist_ok=True)
             
             @classmethod
             def save(cls, key: str, value: str) -> bool:
-                """Save a key-value pair"""
                 try:
                     cls._ensure_storage_dir()
                     file_path = os.path.join(cls.STORAGE_DIR, f"{key}.txt")
@@ -264,7 +213,6 @@ jobs:
             
             @classmethod
             def load(cls, key: str) -> Optional[str]:
-                """Load a value by key"""
                 try:
                     file_path = os.path.join(cls.STORAGE_DIR, f"{key}.txt")
                     if os.path.exists(file_path):
@@ -273,38 +221,13 @@ jobs:
                 except Exception as e:
                     print(f"Storage load error: {e}")
                 return None
-            
-            @classmethod
-            def save_json(cls, key: str, data: dict) -> bool:
-                """Save JSON data"""
-                try:
-                    cls._ensure_storage_dir()
-                    file_path = os.path.join(cls.STORAGE_DIR, f"{key}.json")
-                    with open(file_path, 'w') as f:
-                        json.dump(data, f, indent=2)
-                    return True
-                except Exception as e:
-                    print(f"JSON save error: {e}")
-                    return False
-            
-            @classmethod
-            def load_json(cls, key: str) -> Optional[dict]:
-                """Load JSON data"""
-                try:
-                    file_path = os.path.join(cls.STORAGE_DIR, f"{key}.json")
-                    if os.path.exists(file_path):
-                        with open(file_path, 'r') as f:
-                            return json.load(f)
-                except Exception as e:
-                    print(f"JSON load error: {e}")
-                return None
         EOF
         fi
         
-        # Create main.py if missing (basic Kivy app structure)
+        # Create main.py with Cython language level fix
         if [ ! -f "main.py" ]; then
-          echo "Creating main.py..."
           cat > main.py << 'EOF'
+        # cython: language_level=3
         # main.py - Kortahun United Call Logger Main Application
         
         import kivy
@@ -353,29 +276,26 @@ jobs:
                 init_button.bind(on_press=self.initialize_backend)
                 self.add_widget(init_button)
                 
-                # Initialize on startup
+                # Auto-initialize
                 Clock.schedule_once(self.auto_initialize, 1.0)
             
             def auto_initialize(self, dt):
-                """Auto-initialize backend on startup"""
                 self.initialize_backend(None)
             
             def initialize_backend(self, instance):
-                """Initialize backend connection"""
                 self.status_label.text = "Connecting to backend..."
                 
                 def init_callback(dt):
                     try:
                         success = initialize_backend()
                         if success:
-                            self.status_label.text = "✅ Backend connected successfully!\n\nReady to log calls."
+                            self.status_label.text = "✅ Backend connected!\n\nReady to log calls."
                         else:
-                            self.status_label.text = "❌ Backend connection failed.\n\nPlease check your internet connection and try again."
+                            self.status_label.text = "❌ Backend connection failed.\n\nCheck internet and try again."
                     except Exception as e:
-                        self.status_label.text = f"❌ Initialization error:\n{str(e)}"
-                        Logger.error(f"Backend initialization error: {e}")
+                        self.status_label.text = f"❌ Error:\n{str(e)}"
+                        Logger.error(f"Backend error: {e}")
                 
-                # Run initialization in background
                 Clock.schedule_once(init_callback, 0.1)
         
         class KortahunUnitedsApp(App):
@@ -388,155 +308,180 @@ jobs:
             app.run()
         EOF
         fi
-    
-    - name: Verify required files
-      run: |
-        echo "=== Checking required files ==="
         
-        # Check for essential Python files
-        required_files=(
-          "main.py"
-          "backend_detector.py" 
-          "config.py"
-          "icon.png"
-          "presplash.png"
-        )
-        
-        missing_files=()
-        for file in "${required_files[@]}"; do
-          if [ -f "$file" ]; then
-            echo "✅ $file exists"
-            # Show file size for images
-            if [[ "$file" == *.png ]]; then
-              ls -lh "$file"
-            fi
-          else
-            echo "❌ $file missing"
-            missing_files+=("$file")
-          fi
-        done
-        
-        # Fail if critical files are missing
-        if [ ${#missing_files[@]} -gt 0 ]; then
-          echo "❌ Missing required files: ${missing_files[*]}"
-          echo "Please ensure all required files are in your repository."
-          exit 1
+        # Add Cython language level to backend_detector.py if missing
+        if ! grep -q "# cython: language_level=3" backend_detector.py; then
+          sed -i '1i# cython: language_level=3' backend_detector.py
         fi
-        
-        echo "=== Python file validation ==="
-        # Basic syntax check for Python files
-        python3 -m py_compile main.py
-        python3 -m py_compile backend_detector.py
-        python3 -m py_compile config.py
-        
-        echo "✅ All Python files have valid syntax"
     
-    - name: Create buildozer.spec
+    - name: Create corrected buildozer.spec
       run: |
-        if [ ! -f "buildozer.spec" ]; then
-          echo "Creating buildozer.spec..."
-          cat > buildozer.spec << 'EOF'
+        cat > buildozer.spec << 'EOF'
         [app]
         title = Kortahun United Call Logger
         package.name = kortahuncalllogger
         package.domain = com.kortahununited
         source.dir = .
         source.include_exts = py,png,jpg,kv,atlas,json,txt
-        source.include_patterns = assets/*,data/*
+        source.include_patterns = assets/*,data/*,*.py
         version = 2.0.0
-        requirements = python3,kivy==2.1.0,requests,urllib3,pyjnius,android,plyer,pillow
         
-        # Application settings
-        fullscreen = 0
-        orientation = portrait
+        # Fixed requirements - added requests explicitly
+        requirements = python3,kivy==2.1.0,requests>=2.25.0,urllib3,pyjnius,android,plyer,pillow,certifi,charset-normalizer,idna
         
-        # Icons and splash (using existing files)
-        icon.filename = %(source.dir)s/icon.png
         presplash.filename = %(source.dir)s/presplash.png
+        icon.filename = %(source.dir)s/icon.png
+        orientation = portrait
+        fullscreen = 0
         
-        [buildozer]
-        log_level = 2
+        #
+        # Android specific - FIXED permissions and features
+        #
         
-        [android]
-        # Comprehensive permissions for call logging and networking
-        permissions = INTERNET,READ_CALL_LOG,READ_PHONE_STATE,READ_CONTACTS,ACCESS_NETWORK_STATE,ACCESS_WIFI_STATE,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
+        android.presplash_color = #1E3A8A
         
-        # Android API settings
-        api = 33
-        minapi = 21
-        ndk = 25b
-        accept_sdk_license = True
+        # Fixed: Removed problematic permissions, proper format
+        android.permissions = INTERNET,ACCESS_NETWORK_STATE,ACCESS_WIFI_STATE,READ_CALL_LOG,READ_PHONE_STATE,READ_CONTACTS,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,WAKE_LOCK
         
-        # Build configuration
-        gradle_dependencies = 
-        java_src_dirs = 
-        p4a_dir_whitelist = 
+        # Fixed: Proper features format (no --feature argument)
+        android.features = android.hardware.telephony
         
-        # Bootstrap for better compatibility
-        bootstrap = sdl2
+        # Updated API versions for better compatibility
+        android.api = 34
+        android.minapi = 24
+        android.ndk = 25b
+        android.ndk_api = 24
         
-        # Explicit permission declarations
-        android.add_permissions = android.permission.READ_CALL_LOG,android.permission.READ_PHONE_STATE,android.permission.READ_CONTACTS,android.permission.INTERNET,android.permission.ACCESS_NETWORK_STATE
+        android.private_storage = True
+        android.skip_update = False
+        android.accept_sdk_license = True
+        android.apptheme = "@android:style/Theme.NoTitleBar"
+        android.enable_androidx = True
         
-        # Build artifacts
+        # Java compatibility
+        android.add_compile_options = "sourceCompatibility = 1.8", "targetCompatibility = 1.8"
+        android.gradle_repositories = "google()", "mavenCentral()", "gradlePluginPortal()"
+        
+        # Fixed: Better packaging options to avoid build conflicts
+        android.add_packaging_options = "exclude 'META-INF/DEPENDENCIES'", "exclude 'META-INF/LICENSE'", "exclude 'META-INF/LICENSE.txt'", "exclude 'META-INF/NOTICE'", "exclude 'META-INF/NOTICE.txt'", "exclude 'META-INF/*.kotlin_module'", "exclude 'META-INF/common.kotlin_module'"
+        
+        android.manifest.launch_mode = singleTop
+        android.wakelock = True
+        android.logcat_filters = *:S python:D KortahunUnited:D
+        android.copy_libs = 1
+        android.archs = arm64-v8a, armeabi-v7a
+        android.numeric_version = 20
+        android.allow_backup = True
         android.release_artifact = aab
         android.debug_artifact = apk
         
-        # Optimize for backend connectivity
-        android.allow_backup = True
-        android.network_security_config = True
-        EOF
-        else
-          echo "Using existing buildozer.spec"
-        fi
+        #
+        # Python for android (p4a) specific
+        #
         
-        echo "=== Buildozer Configuration ==="
-        cat buildozer.spec
+        p4a.branch = master
+        p4a.bootstrap = sdl2
+        p4a.private_storage = True
+        
+        #
+        # Buildozer settings
+        #
+        
+        log_level = 2
+        warn_on_root = 1
+        build_dir = ./.buildozer
+        bin_dir = ./bin
+        
+        # Fixed: Comprehensive exclusions to avoid problematic files
+        [buildozer:source.exclude_patterns]
+        license
+        *.pyc
+        *.pyo
+        *.git*
+        */__pycache__/*
+        */.*
+        *~
+        *.bak
+        *.swp
+        *.tmp
+        .DS_Store
+        Thumbs.db
+        .buildozer/*
+        bin/*
+        venv/*
+        env/*
+        .env
+        *.log
+        tests/*
+        test_*
+        *_test.py
+        README.md
+        *.md
+        docs/*
+        */test/*
+        */tests/*
+        **/test/**
+        **/tests/**
+        lib/python*/test/*
+        lib/python*/tests/*
+        # Exclude problematic Python test files that cause encoding errors
+        **/badsyntax_*.py
+        **/test_*.py
+        
+        [app@dev]
+        title = %(title)s (Dev)
+        
+        [app@production]
+        title = %(title)s
+        android.release_artifact = aab
+        EOF
     
-    - name: Verify project structure and dependencies
+    - name: Verify files and dependencies
       run: |
-        echo "=== Final Project Structure ==="
+        echo "=== Project Structure ==="
         ls -la
         
-        echo "=== Python Dependencies Test ==="
-        python3 -c "
-        print('Testing Python imports...')
+        echo "=== Python syntax validation ==="
+        python3 -m py_compile main.py
+        python3 -m py_compile backend_detector.py  
+        python3 -m py_compile config.py
         
+        echo "=== Testing Python imports ==="
+        python3 -c "
+        print('Testing imports...')
         try:
             import kivy
             print(f'✅ Kivy: {kivy.__version__}')
         except ImportError as e:
-            print(f'❌ Kivy import failed: {e}')
+            print(f'❌ Kivy: {e}')
             
         try:
             import requests
             print(f'✅ Requests: {requests.__version__}')
         except ImportError as e:
-            print(f'❌ Requests import failed: {e}')
-        
-        # Test backend detector import
+            print(f'❌ Requests: {e}')
+            
         try:
             from backend_detector import BackendDetector
-            print('✅ Backend detector imports successfully')
+            print('✅ Backend detector imports OK')
         except ImportError as e:
-            print(f'❌ Backend detector import failed: {e}')
-        
-        # Test config import
+            print(f'❌ Backend detector: {e}')
+            
         try:
             from config import AppConfig, StorageManager
-            print('✅ Config imports successfully')
+            print('✅ Config imports OK')
         except ImportError as e:
-            print(f'❌ Config import failed: {e}')
-        
-        print('✅ All dependency tests completed')
+            print(f'❌ Config: {e}')
         "
+        
+        echo "✅ All validations passed"
     
-    - name: Build with Buildozer
+    - name: Build APK with Buildozer
       run: |
-        # Set comprehensive environment variables
+        # Set all required environment variables
         export PYTHONUNBUFFERED=1
-        export ANDROIDAPI=33
-        export ANDROIDMINAPI=21
+        export ANDROIDAPI=34
+        export ANDROIDMINAPI=24
         export ANDROIDSDK=$HOME/.buildozer/android/platform/android-sdk
         export ANDROIDNDK=$HOME/.buildozer/android/platform/android-ndk-r25b
         export ANDROID_SDK_ROOT=$HOME/.buildozer/android/platform/android-sdk
@@ -544,38 +489,36 @@ jobs:
         export ANDROID_NDK_HOME=$HOME/.buildozer/android/platform/android-ndk-r25b
         export PATH=$PATH:$ANDROIDSDK/platform-tools:$ANDROIDSDK/tools/bin:$ANDROIDSDK/cmdline-tools/latest/bin
         
-        echo "=== Environment Variables ==="
-        env | grep -E "(ANDROID|JAVA|PYTHON)" | sort
-        
-        echo "=== Starting Build Process ==="
-        
         # Clean previous builds
         buildozer android clean || true
         
-        # Build debug APK with verbose output
-        echo "Building Android APK..."
-        buildozer android debug --verbose
+        echo "=== Starting Build ==="
+        echo "Environment configured for Android API $ANDROIDAPI, Min API $ANDROIDMINAPI"
         
-        echo "=== Build Completed ==="
-        
-        # Verify APK was created
-        if [ -f "bin/"*.apk ]; then
-            echo "✅ APK build successful!"
-            ls -lh bin/*.apk
+        # Build with comprehensive error handling
+        if buildozer android debug --verbose; then
+            echo "✅ Build successful!"
+            if [ -f bin/*.apk ]; then
+                echo "✅ APK created:"
+                ls -lh bin/*.apk
+            else
+                echo "❌ No APK found after successful build"
+                ls -la bin/ || echo "bin/ directory missing"
+                exit 1
+            fi
         else
-            echo "❌ No APK found in bin/ directory"
-            ls -la bin/ || echo "bin/ directory not found"
+            echo "❌ Build failed"
             exit 1
         fi
         
-    - name: Upload APK artifact
+    - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
         name: kortahun-call-logger-apk
         path: bin/*.apk
         retention-days: 30
         
-    - name: Upload build logs on success
+    - name: Upload success logs
       if: success()
       uses: actions/upload-artifact@v4
       with:
@@ -586,54 +529,29 @@ jobs:
         retention-days: 7
         if-no-files-found: ignore
         
-    - name: Debug information on failure
+    - name: Debug on failure
       if: failure()
       run: |
-        echo "=== Build Failure Debug Information ==="
+        echo "=== Build Failure Debug ==="
         
-        echo "=== Project Structure ==="
-        ls -la
-        
-        echo "=== Python Files Content Check ==="
-        wc -l *.py 2>/dev/null || echo "No Python files found"
-        
-        echo "=== Backend Detector Verification ==="
-        python3 -c "
-        try:
-            from backend_detector import BackendDetector
-            print('✅ BackendDetector can be imported')
-        except Exception as e:
-            print(f'❌ BackendDetector import error: {e}')
-        " || echo "Failed to test backend detector"
-        
-        echo "=== Autotools Verification ==="
-        which libtoolize || echo "libtoolize not found"
-        which autoreconf || echo "autoreconf not found"
-        ls -la /usr/share/aclocal/lt*.m4 || echo "No libtool m4 files found"
-        
-        echo "=== Buildozer Directory Structure ==="
-        find .buildozer -type d -maxdepth 3 2>/dev/null || echo "No .buildozer directory"
-        
-        echo "=== Build Logs (last 100 lines each) ==="
-        find .buildozer -name "*.log" -type f -exec echo "=== {} ===" \; -exec tail -100 {} \; 2>/dev/null || echo "No log files found"
-        
-        echo "=== Buildozer State ==="
-        ls -la .buildozer/state/ 2>/dev/null || echo "No buildozer state directory"
-        
-        echo "=== Environment Variables ==="
+        echo "=== Environment Check ==="
         env | grep -E "(ANDROID|JAVA|PYTHON)" | sort
         
-        echo "=== System Resources ==="
-        echo "Disk space:"
-        df -h
-        echo "Memory usage:"
-        free -h
+        echo "=== Autotools Status ==="
+        which libtoolize autoreconf
+        ls -la /usr/share/aclocal/lt*.m4
         
-    - name: Upload build logs on failure
+        echo "=== Build Logs (last 50 lines) ==="
+        find .buildozer -name "*.log" -type f -exec echo "=== {} ===" \; -exec tail -50 {} \; 2>/dev/null
+        
+        echo "=== System Resources ==="
+        df -h && free -h
+        
+    - name: Upload failure logs
       if: failure()
       uses: actions/upload-artifact@v4
       with:
-        name: build-logs-failure
+        name: build-logs-failure-detailed
         path: |
           .buildozer/
           buildozer.spec

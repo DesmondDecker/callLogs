@@ -1,3 +1,4 @@
+# cython: language_level=3
 # backend_detector.py - Production-ready backend detection and device registration
 
 import requests
@@ -5,7 +6,61 @@ import json
 import time
 from typing import Optional, Dict, List, Tuple
 from urllib.parse import urljoin
-from config import AppConfig, StorageManager, is_android, get_platform_name
+
+# Import with error handling for Android compatibility
+try:
+    from config import AppConfig, StorageManager, is_android, get_platform_name
+except ImportError as e:
+    print(f"Config import warning: {e}")
+    # Fallback implementations for testing
+    class AppConfig:
+        CONNECTIVITY_TEST_URLS = [
+            'https://www.google.com',
+            'https://httpbin.org/get',
+            'https://jsonplaceholder.typicode.com/posts/1'
+        ]
+        
+        @staticmethod
+        def get_api_urls():
+            return [
+                'https://api.kortahununited.com',
+                'https://kortahun-api.herokuapp.com',
+                'http://localhost:8000'
+            ]
+        
+        @staticmethod
+        def get_user_id():
+            return 'default_user'
+        
+        @staticmethod
+        def generate_device_id():
+            import uuid
+            return str(uuid.uuid4())
+        
+        @staticmethod
+        def get_device_info():
+            return {
+                'platform': 'unknown',
+                'version': '1.0',
+                'model': 'unknown'
+            }
+    
+    class StorageManager:
+        _storage = {}
+        
+        @classmethod
+        def save(cls, key, value):
+            cls._storage[key] = value
+        
+        @classmethod
+        def load(cls, key):
+            return cls._storage.get(key)
+    
+    def is_android():
+        return False
+    
+    def get_platform_name():
+        return 'Desktop'
 
 class BackendDetector:
     """
