@@ -24,115 +24,191 @@ jobs:
       uses: actions/cache@v3
       with:
         path: .buildozer_global
-        key: buildozer-global-${{ hashFiles('buildozer.spec') }}-v2
+        key: buildozer-global-${{ hashFiles('buildozer.spec') }}-v3
     
     - name: Cache Buildozer directory
       uses: actions/cache@v3
       with:
         path: .buildozer
-        key: buildozer-${{ hashFiles('buildozer.spec') }}-v2
+        key: buildozer-${{ hashFiles('buildozer.spec') }}-v3
     
-    - name: Clean potential corrupted autotools cache
-      run: |
-        # Clean any cached autotools files and regenerate aclocal
-        sudo rm -rf /var/lib/aclocal-macros || true
-        sudo aclocal --install --force || true
-        # Verify critical autotools files exist
-        echo "Checking for required autotools files:"
-        ls -la /usr/share/aclocal/ltoptions.m4 || echo "ERROR: ltoptions.m4 missing"
-        ls -la /usr/share/aclocal/ltsugar.m4 || echo "ERROR: ltsugar.m4 missing"
-        ls -la /usr/share/aclocal/ltversion.m4 || echo "ERROR: ltversion.m4 missing"
-        ls -la /usr/share/aclocal/lt~obsolete.m4 || echo "ERROR: lt~obsolete.m4 missing"
-    
-    - name: Install dependencies
+    - name: Install system dependencies
       run: |
         sudo apt-get update
-        # Remove any existing potentially corrupted autotools
-        sudo apt-get remove -y libtool automake autoconf || true
-        # Install fresh autotools packages with all required files
-        sudo apt-get install -y git zip unzip openjdk-17-jdk python3-pip
-        sudo apt-get install -y libtool automake autoconf autotools-dev
-        sudo apt-get install -y pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev cmake libffi-dev libssl-dev m4 build-essential gettext-base
-        # Verify ltoptions.m4 exists
-        ls -la /usr/share/aclocal/ltoptions.m4 || echo "ltoptions.m4 still missing - will try to fix"
-        # If still missing, reinstall libtool specifically
-        if [ ! -f /usr/share/aclocal/ltoptions.m4 ]; then
-          sudo apt-get install --reinstall libtool
-        fi
-        pip3 install --upgrade pip
+        # Install essential build tools first
+        sudo apt-get install -y \
+          git \
+          zip \
+          unzip \
+          openjdk-17-jdk \
+          python3-pip \
+          build-essential \
+          pkg-config \
+          cmake \
+          ninja-build \
+          ccache \
+          libffi-dev \
+          libssl-dev \
+          zlib1g-dev \
+          libncurses5-dev \
+          libncursesw5-dev \
+          libbz2-dev \
+          libreadline-dev \
+          libsqlite3-dev \
+          wget \
+          curl \
+          llvm \
+          libffi-dev \
+          libssl-dev \
+          zlib1g-dev \
+          libbz2-dev \
+          libreadline-dev \
+          libsqlite3-dev \
+          tk-dev \
+          libpng-dev \
+          libfreetype6-dev
+        
+        # Install autotools with proper cleanup
+        sudo apt-get remove --purge -y libtool automake autoconf || true
+        sudo apt-get autoremove -y
+        sudo apt-get autoclean
+        
+        # Install fresh autotools
+        sudo apt-get install -y \
+          autoconf \
+          automake \
+          libtool \
+          autotools-dev \
+          m4 \
+          gettext-base
+        
+        # Verify critical files exist
+        echo "Verifying autotools installation:"
+        ls -la /usr/share/aclocal/ltoptions.m4 || { echo "ERROR: ltoptions.m4 missing"; exit 1; }
+        ls -la /usr/share/aclocal/ltsugar.m4 || { echo "ERROR: ltsugar.m4 missing"; exit 1; }
+        ls -la /usr/share/aclocal/ltversion.m4 || { echo "ERROR: ltversion.m4 missing"; exit 1; }
+        ls -la /usr/share/aclocal/lt~obsolete.m4 || { echo "ERROR: lt~obsolete.m4 missing"; exit 1; }
+        
+        # Install Python dependencies
+        pip3 install --upgrade pip setuptools wheel
         pip3 install buildozer cython==0.29.33
     
     - name: Setup Android SDK and NDK
       run: |
-        # Clean any existing Android setup to avoid conflicts
+        # Clean any existing Android setup
         rm -rf $HOME/.buildozer/android/platform/android-sdk
         rm -rf $HOME/.buildozer/android/platform/android-ndk*
         
         # Create directories
         mkdir -p $HOME/.buildozer/android/platform
         
-        # Download and setup Android SDK
+        # Download and setup Android SDK Command Line Tools
         wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
         unzip -q commandlinetools-linux-9477386_latest.zip
         mkdir -p $HOME/.buildozer/android/platform/android-sdk/cmdline-tools
         mv cmdline-tools $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest
         
-        # Create compatibility symlink for Buildozer
-        mkdir -p $HOME/.buildozer/android/platform/android-sdk/tools/bin
-        ln -s $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager $HOME/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager
-        ln -s $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/avdmanager $HOME/.buildozer/android/platform/android-sdk/tools/bin/avdmanager
-        
-        # Set environment variables
+        # Set initial environment variables
         export ANDROID_SDK_ROOT=$HOME/.buildozer/android/platform/android-sdk
         export ANDROID_HOME=$HOME/.buildozer/android/platform/android-sdk
+        export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
         
-        # Accept all Android SDK licenses automatically
-        yes | $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses --sdk_root=$HOME/.buildozer/android/platform/android-sdk
+        # Accept all licenses first
+        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses --sdk_root=$ANDROID_SDK_ROOT
         
-        # Install essential build-tools, platform-tools, and platforms
-        $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager --sdk_root=$HOME/.buildozer/android/platform/android-sdk \
+        # Install required SDK components
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_SDK_ROOT \
           "platform-tools" \
           "build-tools;34.0.0" \
+          "build-tools;33.0.2" \
           "platforms;android-33" \
+          "platforms;android-31" \
           "platforms;android-21"
         
-        # Download and setup Android NDK 25b (CRITICAL: Use NDK 25b, not older versions)
+        # Download and setup Android NDK r25b
         wget -q https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
         unzip -q android-ndk-r25b-linux.zip
         mv android-ndk-r25b $HOME/.buildozer/android/platform/android-ndk-r25b
         
-        # Set environment variables - IMPORTANT: Point to the correct NDK version
+        # Set environment variables for GitHub Actions
         echo "ANDROIDSDK=$HOME/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
         echo "ANDROIDNDK=$HOME/.buildozer/android/platform/android-ndk-r25b" >> $GITHUB_ENV
         echo "ANDROIDAPI=33" >> $GITHUB_ENV
         echo "ANDROIDMINAPI=21" >> $GITHUB_ENV
         echo "ANDROID_SDK_ROOT=$HOME/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
         echo "ANDROID_HOME=$HOME/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
+        echo "ANDROID_NDK_HOME=$HOME/.buildozer/android/platform/android-ndk-r25b" >> $GITHUB_ENV
         
         # Verify installations
-        echo "Verifying SDK installation:"
-        ls -la $HOME/.buildozer/android/platform/android-sdk/
-        echo "Build-tools directory:"
-        ls -la $HOME/.buildozer/android/platform/android-sdk/build-tools/ || echo "Build-tools not found"
-        echo "Platform-tools directory:"
-        ls -la $HOME/.buildozer/android/platform/android-sdk/platform-tools/ || echo "Platform-tools not found"
-        echo "NDK directory:"
-        ls -la $HOME/.buildozer/android/platform/android-ndk-r25b/ || echo "NDK not found"
+        echo "SDK verification:"
+        ls -la $HOME/.buildozer/android/platform/android-sdk/platform-tools/
+        echo "NDK verification:"
+        ls -la $HOME/.buildozer/android/platform/android-ndk-r25b/toolchains/
+    
+    - name: Create buildozer.spec if missing
+      run: |
+        if [ ! -f "buildozer.spec" ]; then
+          echo "Creating buildozer.spec..."
+          cat > buildozer.spec << 'EOF'
+        [app]
+        title = Call Log Monitor
+        package.name = calllogmonitor
+        package.domain = com.example
+        source.dir = .
+        source.include_exts = py,png,jpg,kv,atlas
+        version = 0.1
+        requirements = python3,kivy==2.1.0,requests,pyjnius,android,urllib3,plyer
+        
+        [buildozer]
+        log_level = 2
+        
+        [app]
+        presplash.filename = %(source.dir)s/presplash.png
+        icon.filename = %(source.dir)s/icon.png
+        
+        [android]
+        permissions = INTERNET,READ_CALL_LOG,READ_PHONE_STATE,READ_CONTACTS,ACCESS_NETWORK_STATE
+        api = 33
+        minapi = 21
+        ndk = 25b
+        accept_sdk_license = True
+        
+        [android.gradle_dependencies]
+        
+        [android.java_src_dirs]
+        
+        [android.p4a_dir_whitelist]
+        
+        [android.add_src]
+        
+        [android.add_aars]
+        
+        [android.add_jars]
+        
+        [android.add_gradle_repositories]
+        
+        [android.add_gradle_dependencies]
+        EOF
+        fi
     
     - name: Build with Buildozer
       run: |
-        # Clean any previous failed builds
-        buildozer android clean || true
-        # Force regenerate autotools files
+        # Set environment variables
         export PYTHONUNBUFFERED=1
-        buildozer android debug
-      env:
-        ANDROIDSDK: ${{ env.ANDROIDSDK }}
-        ANDROIDNDK: ${{ env.ANDROIDNDK }}
-        ANDROIDAPI: ${{ env.ANDROIDAPI }}
-        ANDROIDMINAPI: ${{ env.ANDROIDMINAPI }}
-        ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
-        ANDROID_HOME: ${{ env.ANDROID_HOME }}
+        export ANDROIDAPI=33
+        export ANDROIDMINAPI=21
+        export ANDROIDSDK=$HOME/.buildozer/android/platform/android-sdk
+        export ANDROIDNDK=$HOME/.buildozer/android/platform/android-ndk-r25b
+        export ANDROID_SDK_ROOT=$HOME/.buildozer/android/platform/android-sdk
+        export ANDROID_HOME=$HOME/.buildozer/android/platform/android-sdk
+        export ANDROID_NDK_HOME=$HOME/.buildozer/android/platform/android-ndk-r25b
+        export PATH=$PATH:$ANDROIDSDK/platform-tools:$ANDROIDSDK/tools/bin:$ANDROIDSDK/cmdline-tools/latest/bin
+        
+        # Clean previous builds
+        buildozer android clean || true
+        
+        # Build debug APK
+        buildozer android debug --verbose
         
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
@@ -140,14 +216,22 @@ jobs:
         name: call-log-monitor-apk
         path: bin/*.apk
         
-    - name: List build directory contents (for debugging)
+    - name: Debug information on failure
       if: failure()
       run: |
-        echo "Build directory contents:"
+        echo "=== Autotools verification ==="
+        which libtoolize || echo "libtoolize not found"
+        which autoreconf || echo "autoreconf not found"
+        ls -la /usr/share/aclocal/lt*.m4 || echo "No libtool m4 files found"
+        
+        echo "=== Build directory contents ==="
         ls -la
-        echo "Bin directory contents:"
-        ls -la bin/ || echo "Bin directory not found"
-        echo "Android platform contents:"
-        ls -la $HOME/.buildozer/android/platform/ || echo "Platform directory not found"
-        echo "SDK build-tools contents:"
-        ls -la $HOME/.buildozer/android/platform/android-sdk/build-tools/ || echo "Build-tools directory not found"
+        
+        echo "=== Buildozer directory ==="
+        ls -la .buildozer/ || echo "No .buildozer directory"
+        
+        echo "=== Python-for-android build log (last 50 lines) ==="
+        find .buildozer -name "*.log" -exec tail -50 {} \; || echo "No log files found"
+        
+        echo "=== Environment variables ==="
+        env | grep -E "(ANDROID|JAVA)" | sort
