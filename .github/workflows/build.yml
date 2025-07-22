@@ -343,8 +343,8 @@ jobs:
         # Fixed: Removed problematic permissions, proper format
         android.permissions = INTERNET,ACCESS_NETWORK_STATE,ACCESS_WIFI_STATE,READ_CALL_LOG,READ_PHONE_STATE,READ_CONTACTS,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,WAKE_LOCK
         
-        # Fixed: Proper features format (no --feature argument)
-        android.features = android.hardware.telephony
+        # Fixed: Use proper manifest XML addition instead of invalid --feature argument
+        android.add_manifest_xml = <uses-feature android:name="android.hardware.telephony" android:required="false" />
         
         # Updated API versions for better compatibility
         android.api = 34

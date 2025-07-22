@@ -54,6 +54,9 @@ android.presplash_color = #1E3A8A
 # (list) Permissions
 android.permissions = INTERNET,ACCESS_NETWORK_STATE,ACCESS_WIFI_STATE,READ_CALL_LOG,READ_PHONE_STATE,READ_CONTACTS,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,WAKE_LOCK
 
+# (str) Android hardware features - FIXED: Use proper manifest addition instead of --feature
+android.add_manifest_xml = <uses-feature android:name="android.hardware.telephony" android:required="false" />
+
 # (int) Target Android API, should be as high as possible.
 android.api = 34
 
