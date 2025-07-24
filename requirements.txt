@@ -1,8 +1,12 @@
 # Python dependencies for Call Center Sync app
-kivy>=2.1.0
-requests>=2.28.0
-python-dateutil>=2.8.0
+kivy>=2.1.0,<2.2.0
+requests>=2.28.0,<3.0.0
+python-dateutil>=2.8.0,<3.0.0
+
+# Build dependencies (for development)
+buildozer==1.5.0
+cython>=0.29.36,<3.0.0
 
 # Android-specific dependencies (automatically handled by buildozer)
-# pyjnius (for Java integration)
-# android (for Android-specific functionality)
+# pyjnius (for Java integration) - handled by buildozer
+# android (for Android-specific functionality) - handled by buildozer

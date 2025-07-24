@@ -16,7 +16,7 @@ jobs:
       uses: actions/checkout@v4
       
     - name: Setup Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
         
@@ -24,22 +24,29 @@ jobs:
       uses: actions/setup-java@v4
       with:
         distribution: 'temurin'
-        java-version: '11'
+        java-version: '17'  # Updated to Java 17 for better Android support
         
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
-      
+      with:
+        api-level: 31
+        build-tools: 31.0.0
+        
     - name: Cache Buildozer global directory
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: .buildozer_global
         key: buildozer-global-${{ hashFiles('buildozer.spec') }}
+        restore-keys: |
+          buildozer-global-
         
     - name: Cache Buildozer directory
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: .buildozer
-        key: ${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+        key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
+        restore-keys: |
+          ${{ runner.os }}-buildozer-
         
     - name: Install system dependencies
       run: |
@@ -64,58 +71,151 @@ jobs:
           libxml2-dev \
           libxmlsec1-dev \
           liblzma-dev \
-          openjdk-11-jdk \
+          openjdk-17-jdk \
           unzip \
-          zlib1g-dev
+          zlib1g-dev \
+          autoconf \
+          libtool \
+          pkg-config \
+          cmake
           
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install buildozer cython
+        pip install buildozer==1.5.0 cython==0.29.36
         pip install -r requirements.txt
         
-    - name: Set Android SDK environment variables
+    - name: Set Android environment variables
       run: |
-        echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
-        echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
-        echo "PATH=$PATH:$HOME/android-sdk/cmdline-tools/latest/bin:$HOME/android-sdk/platform-tools" >> $GITHUB_ENV
+        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+        echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+        echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
+        echo "PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_ENV
         
-    - name: Initialize Buildozer
+    - name: Accept Android SDK licenses
       run: |
-        # Create buildozer directory structure
-        mkdir -p ~/.buildozer/android/platform
+        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
         
-        # Set permissions
-        chmod +x $(which buildozer) || true
-        
-        # Initialize if not already done
-        if [ ! -f .buildozer/state.db ]; then
-          buildozer init || true
-        fi
-        
-    - name: Build APK
+    - name: Create buildozer spec file
       run: |
-        # Set proper permissions and build
-        export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
-        export ANDROID_SDK_ROOT=$HOME/android-sdk
-        export ANDROID_HOME=$HOME/android-sdk
+        cat > buildozer.spec << 'EOF'
+        [app]
+        # Application configuration
+        title = Call Center Sync
+        package.name = callcentersync
+        package.domain = com.callcenter.sync
+
+        # Source code settings
+        source.dir = .
+        source.include_exts = py,png,jpg,kv,atlas,txt,json
+
+        # Application version and entry point
+        version = 1.0
+        version.regex = __version__ = ['"]([^'"]*)['"]
+        version.filename = %(source.dir)s/main.py
+
+        # Entry point
+        source.main = main.py
+
+        # Requirements - essential only
+        requirements = python3,kivy==2.1.0,requests,pyjnius,android
+
+        # Supported orientations
+        orientation = portrait
+
+        # Services (none needed for this app)
+        services = 
+
+        # Skip dist info
+        skip_dist = 1
+
+        [android]
+        # Android API settings
+        android.api = 31
+        android.minapi = 21
+        android.ndk = 25b
+        android.sdk = 31
+
+        # Accept SDK license
+        android.accept_sdk_license = True
+
+        # Permissions required by the app
+        android.permissions = INTERNET,ACCESS_NETWORK_STATE,READ_CALL_LOG,READ_PHONE_STATE,READ_CONTACTS,WAKE_LOCK
+
+        # Architecture - focus on common ones for CI
+        android.archs = arm64-v8a,armeabi-v7a
+
+        # Application metadata
+        android.meta_data = 
+
+        # Gradle dependencies (none needed)
+        android.gradle_dependencies = 
+
+        # Bootstrap
+        p4a.bootstrap = sdl2
+
+        # Build tools version
+        android.gradle_repositories = google(), mavenCentral()
+
+        [buildozer]
+        # Buildozer settings
+        log_level = 2
+        warn_on_root = 1
+
+        # Build directory
+        build_dir = ./.buildozer
+
+        # Binary directory  
+        bin_dir = ./bin
+        EOF
         
-        # Build the APK
-        buildozer android debug
+    - name: Initialize and build APK
+      run: |
+        # Set proper environment
+        export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+        export ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT
+        export ANDROID_HOME=$ANDROID_SDK_ROOT
+        export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools
+        
+        # Build the APK with verbose output
+        buildozer android debug --verbose
+        
+    - name: List built files
+      run: |
+        echo "Contents of bin directory:"
+        ls -la bin/ || echo "No bin directory found"
+        echo "Looking for APK files:"
+        find . -name "*.apk" -type f 2>/dev/null || echo "No APK files found"
         
     - name: Upload APK artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
+      if: success()
       with:
         name: call-center-sync-apk
-        path: bin/*.apk
+        path: |
+          bin/*.apk
+          .buildozer/android/platform/build-**/outputs/apk/**/*.apk
         retention-days: 30
+        if-no-files-found: warn
+        
+    - name: Upload build logs (on failure)
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: build-logs
+        path: |
+          .buildozer/android/platform/build-*/logs/
+          .buildozer/android/platform/python-for-android/
+        retention-days: 7
+        if-no-files-found: ignore
         
     - name: Create Release (on tag)
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/') && success()
+      uses: softprops/action-gh-release@v2
       with:
         files: bin/*.apk
         draft: false
         prerelease: false
+        generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
