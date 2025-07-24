@@ -1,148 +1,45 @@
 [app]
-# (str) Title of your application
-title = Kortahun United Call Logger
+# Application configuration
+title = Call Center Sync
+package.name = callcentersync
+package.domain = com.callcenter.sync
 
-# (str) Package name
-package.name = kortahuncalllogger
-
-# (str) Package domain (needed for android/ios packaging)
-package.domain = com.kortahununited
-
-# (str) Source code where the main.py live
+# Source code settings
 source.dir = .
+source.include_exts = py,png,jpg,kv,atlas,txt,json
 
-# (list) Source files to include (let empty to include all the files)
-source.include_exts = py,png,jpg,kv,atlas,json,txt
+# Application version
+version = 1.0
+version.regex = __version__ = ['"]([^'"]*)['"]
+version.filename = %(source.dir)s/main.py
 
-# (list) List of inclusions using pattern matching
-source.include_patterns = assets/*,data/*,*.py
+# Requirements
+requirements = python3,kivy,requests,pyjnius,android
 
-# (list) Source files to exclude (let empty to not exclude anything)
-source.exclude_exts = spec
-
-# (list) List of directory to exclude (let empty to not exclude anything)
-source.exclude_dirs = tests,bin,.buildozer,venv,__pycache__
-
-# (list) List of exclusions using pattern matching
-source.exclude_patterns = license,images/*,*.pyc,*~,*.bak,*.swp,*.tmp,.DS_Store,Thumbs.db,.git*,*/.*,README.md,*.md,docs/*
-
-# (str) Application versioning (method 1)
-version = 2.0.0
-
-# (list) Application requirements
-requirements = python3,kivy==2.1.0,requests>=2.25.0,urllib3,pyjnius,android,plyer,pillow,certifi,charset-normalizer,idna
-
-# (str) Presplash of the application
-presplash.filename = %(source.dir)s/presplash.png
-
-# (str) Icon of the application
-icon.filename = %(source.dir)s/icon.png
-
-# (str) Supported orientation (one of landscape, sensorLandscape, portrait or all)
-orientation = portrait
-
-#
-# Android specific
-#
-
-# (bool) Indicate if the application should be fullscreen or not
-fullscreen = 0
-
-# (string) Presplash background color (for android toolchain)
-android.presplash_color = #1E3A8A
-
-# (list) Permissions
-android.permissions = INTERNET,ACCESS_NETWORK_STATE,ACCESS_WIFI_STATE,READ_CALL_LOG,READ_PHONE_STATE,READ_CONTACTS,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,WAKE_LOCK
-
-# (str) Android hardware features - FIXED: Use proper manifest addition instead of --feature
-android.add_manifest_xml = <uses-feature android:name="android.hardware.telephony" android:required="false" />
-
-# (int) Target Android API, should be as high as possible.
-android.api = 34
-
-# (int) Minimum API your APK / AAB will support.
-android.minapi = 24
-
-# (str) Android NDK version to use
+# Android specific settings
+[android]
+# Android API settings
+android.api = 31
+android.minapi = 21
 android.ndk = 25b
+android.sdk = 31
 
-# (int) Android NDK API to use. This is the minimum API your app will support
-android.ndk_api = 24
+# Permissions
+android.permissions = INTERNET,ACCESS_NETWORK_STATE,READ_CALL_LOG,READ_PHONE_STATE,READ_CONTACTS
 
-# (bool) Use --private data storage (True) or --dir public storage (False)
-android.private_storage = True
+# Architecture
+android.archs = arm64-v8a,armeabi-v7a
 
-# (bool) If True, then skip trying to update the Android sdk
-android.skip_update = False
+# Application metadata
+android.meta_data = com.google.android.gms.version=@integer/google_play_services_version
 
-# (bool) If True, then automatically accept SDK license agreements
-android.accept_sdk_license = True
+# Gradle dependencies
+android.gradle_dependencies = 
 
-# (str) Android app theme, default is ok for Kivy-based app
-android.apptheme = @android:style/Theme.NoTitleBar
+# Add java src directory for custom java code
+android.add_src = java
 
-# (bool) Enable AndroidX support
-android.enable_androidx = True
-
-# (list) add java compile options
-android.add_compile_options = sourceCompatibility = 1.8, targetCompatibility = 1.8
-
-# (list) Gradle repositories to add  
-android.gradle_repositories = google(), mavenCentral(), gradlePluginPortal()
-
-# (list) packaging options to add
-android.add_packaging_options = exclude 'META-INF/DEPENDENCIES', exclude 'META-INF/LICENSE', exclude 'META-INF/LICENSE.txt', exclude 'META-INF/NOTICE', exclude 'META-INF/NOTICE.txt', exclude 'META-INF/*.kotlin_module', exclude 'META-INF/common.kotlin_module'
-
-# (str) launchMode to set for the main activity
-android.manifest.launch_mode = singleTop
-
-# (bool) Indicate whether the screen should stay on
-android.wakelock = True
-
-# (str) Android logcat filters to use
-android.logcat_filters = *:S python:D KortahunUnited:D
-
-# (bool) Copy library instead of making a libpymodules.so
-android.copy_libs = 1
-
-# (list) The Android archs to build for
-android.archs = arm64-v8a, armeabi-v7a
-
-# (int) overrides automatic versionCode computation
-android.numeric_version = 20
-
-# (bool) enables Android auto backup feature
-android.allow_backup = True
-
-# Release configuration
-android.release_artifact = aab
-android.debug_artifact = apk
-
-#
-# Python for android (p4a) specific
-#
-
-# (str) python-for-android branch to use
-p4a.branch = master
-
-# (str) Bootstrap to use for android builds
-p4a.bootstrap = sdl2
-
-# Control passing the --private and --dir arguments to p4a
-p4a.private_storage = True
-
-#
-# Buildozer (global) settings
-#
-
-# (int) Log level (0 = error only, 1 = info, 2 = debug (with command output))
+[buildozer]
+# Buildozer settings
 log_level = 2
-
-# (int) Display warning if buildozer is run as root (0 = False, 1 = True)
 warn_on_root = 1
-
-# (str) Path to build artifact storage, absolute or relative to spec file
-build_dir = ./.buildozer
-
-# (str) Path to build output (i.e. .apk, .aab, .ipa) storage
-bin_dir = ./bin
