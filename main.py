@@ -4,6 +4,8 @@ Call Center Mobile Application
 Real-time call log synchronization with backend
 """
 
+__version__ = "1.0"
+
 import os
 import json
 import time
@@ -24,17 +26,24 @@ from kivy.utils import platform
 
 # Platform-specific imports
 if platform == 'android':
-    from android.permissions import request_permissions, Permission, check_permission
-    from android.storage import primary_external_storage_path
-    from jnius import autoclass, cast
-    
-    # Android Java classes
-    PythonActivity = autoclass('org.kivy.android.PythonActivity')
-    Context = autoclass('android.content.Context')
-    CallLog = autoclass('android.provider.CallLog')
-    ContentResolver = autoclass('android.content.ContentResolver')
-    Uri = autoclass('android.net.Uri')
-    Cursor = autoclass('android.database.Cursor')
+    try:
+        from android.permissions import request_permissions, Permission, check_permission
+        from android.storage import primary_external_storage_path
+        from jnius import autoclass, cast
+        
+        # Android Java classes
+        PythonActivity = autoclass('org.kivy.android.PythonActivity')
+        Context = autoclass('android.content.Context')
+        CallLog = autoclass('android.provider.CallLog')
+        ContentResolver = autoclass('android.content.ContentResolver')
+        Uri = autoclass('android.net.Uri')
+        Cursor = autoclass('android.database.Cursor')
+        ANDROID_AVAILABLE = True
+    except ImportError:
+        ANDROID_AVAILABLE = False
+        print("Android modules not available - running in desktop mode")
+else:
+    ANDROID_AVAILABLE = False
 
 
 class CallLogReader:
@@ -43,38 +52,49 @@ class CallLogReader:
     def __init__(self):
         self.context = None
         self.content_resolver = None
-        if platform == 'android':
-            self.context = PythonActivity.mActivity
-            self.content_resolver = self.context.getContentResolver()
+        if platform == 'android' and ANDROID_AVAILABLE:
+            try:
+                self.context = PythonActivity.mActivity
+                self.content_resolver = self.context.getContentResolver()
+            except Exception as e:
+                print(f"Error initializing Android context: {e}")
     
     def request_permissions(self):
         """Request necessary permissions for call log access"""
-        if platform == 'android':
-            permissions = [
-                Permission.READ_CALL_LOG,
-                Permission.READ_PHONE_STATE,
-                Permission.READ_CONTACTS,
-                Permission.INTERNET,
-                Permission.ACCESS_NETWORK_STATE
-            ]
-            request_permissions(permissions)
-            return True
+        if platform == 'android' and ANDROID_AVAILABLE:
+            try:
+                permissions = [
+                    Permission.READ_CALL_LOG,
+                    Permission.READ_PHONE_STATE,
+                    Permission.READ_CONTACTS,
+                    Permission.INTERNET,
+                    Permission.ACCESS_NETWORK_STATE
+                ]
+                request_permissions(permissions)
+                return True
+            except Exception as e:
+                print(f"Error requesting permissions: {e}")
+                return False
         return False
     
     def check_permissions(self):
         """Check if all required permissions are granted"""
-        if platform == 'android':
-            required_perms = [
-                Permission.READ_CALL_LOG,
-                Permission.READ_PHONE_STATE,
-                Permission.READ_CONTACTS
-            ]
-            return all(check_permission(perm) for perm in required_perms)
+        if platform == 'android' and ANDROID_AVAILABLE:
+            try:
+                required_perms = [
+                    Permission.READ_CALL_LOG,
+                    Permission.READ_PHONE_STATE,
+                    Permission.READ_CONTACTS
+                ]
+                return all(check_permission(perm) for perm in required_perms)
+            except Exception as e:
+                print(f"Error checking permissions: {e}")
+                return False
         return True  # For desktop testing
     
     def get_call_logs(self, limit=50):
         """Fetch call logs from Android system"""
-        if platform != 'android':
+        if platform != 'android' or not ANDROID_AVAILABLE:
             # Mock data for desktop testing
             return self._get_mock_call_logs()
         
@@ -174,7 +194,7 @@ class BackendSync:
                 'manufacturer': 'Generic',
                 'os': 'Android',
                 'osVersion': '10.0',
-                'appVersion': '1.0.0'
+                'appVersion': __version__
             },
             'permissions': {
                 'readCallLog': True,
@@ -270,7 +290,7 @@ class CallCenterApp(App):
         self.stats = {'sent': 0, 'success': 0, 'error': 0}
         
         # Request permissions on startup
-        if platform == 'android':
+        if platform == 'android' and ANDROID_AVAILABLE:
             Clock.schedule_once(lambda dt: self.call_reader.request_permissions(), 1)
         
         return self.create_ui()
@@ -281,7 +301,7 @@ class CallCenterApp(App):
         
         # Header
         header = Label(
-            text='📱 Call Center Sync\nReal-time Call Log Synchronization',
+            text=f'📱 Call Center Sync v{__version__}\nReal-time Call Log Synchronization',
             size_hint_y=None, height=80,
             halign='center', text_size=(None, None)
         )
@@ -414,7 +434,8 @@ class CallCenterApp(App):
         
         # Initial logs
         self.add_log("🚀 Call Center Sync initialized")
-        self.add_log("📱 Checking permissions...")
+        self.add_log(f"📱 Platform: {platform}")
+        self.add_log(f"🔧 Android APIs: {'Available' if ANDROID_AVAILABLE else 'Mock Mode'}")
         
         return layout
     
