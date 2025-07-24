@@ -41,6 +41,10 @@ android.minapi = 21
 android.ndk = 25b
 android.sdk = 31
 
+# Explicit SDK and NDK paths - will be set by environment
+android.sdk_path = %(env:ANDROID_SDK_ROOT)s
+android.ndk_path = %(env:ANDROID_SDK_ROOT)s/ndk/25.1.8937393
+
 # Accept SDK license automatically
 android.accept_sdk_license = True
 
