@@ -8,8 +8,7 @@ package.domain = com.callcenter.sync
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,txt,json
 
-# Application version and entry point
-version = 1.0
+# Application version extracted from main.py
 version.regex = __version__ = ['"]([^'"]*)['"]
 version.filename = %(source.dir)s/main.py
 
