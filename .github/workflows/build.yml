@@ -122,51 +122,108 @@ jobs:
         # Accept all licenses first
         yes | $SDKMANAGER --licenses || true
         
-        # Force install critical components
+        # Force install critical components with retry logic
         echo "=== Installing Android SDK Components ==="
-        $SDKMANAGER --install "build-tools;31.0.0" --verbose
-        $SDKMANAGER --install "build-tools;30.0.3" --verbose  # Backup version
-        $SDKMANAGER --install "platform-tools" --verbose
-        $SDKMANAGER --install "platforms;android-31" --verbose
-        $SDKMANAGER --install "ndk;25.1.8937393" --verbose
         
-        # Verify build-tools installation
-        echo "=== Verifying Build-Tools Installation ==="
-        ls -la $ANDROID_SDK_ROOT/build-tools/ || echo "Build-tools directory not found"
-        
-        # Check for aidl in multiple versions
-        AIDL_FOUND=""
-        for version in 31.0.0 30.0.3; do
-          AIDL_PATH="$ANDROID_SDK_ROOT/build-tools/$version/aidl"
+        # Try multiple build-tools versions with more aggressive installation
+        for BUILD_TOOLS_VER in "31.0.0" "30.0.3" "29.0.3" "28.0.3"; do
+          echo "Attempting to install build-tools;$BUILD_TOOLS_VER"
+          $SDKMANAGER --install "build-tools;$BUILD_TOOLS_VER" --verbose || echo "Failed to install $BUILD_TOOLS_VER"
+          
+          # Check if aidl exists after each installation
+          AIDL_PATH="$ANDROID_SDK_ROOT/build-tools/$BUILD_TOOLS_VER/aidl"
           if [ -f "$AIDL_PATH" ]; then
-            echo "✅ Found aidl at: $AIDL_PATH"
-            ls -la "$AIDL_PATH"
-            
-            # Make sure it's executable
+            echo "✅ Found aidl at: $AIDL_PATH after installing $BUILD_TOOLS_VER"
             chmod +x "$AIDL_PATH" 2>/dev/null || true
             
             # Test if it works
             if "$AIDL_PATH" --help >/dev/null 2>&1; then
-              echo "✅ aidl is working in version $version"
-              AIDL_FOUND="$version"
-              echo "WORKING_BUILD_TOOLS_VERSION=$version" >> $GITHUB_ENV
+              echo "✅ aidl is working in version $BUILD_TOOLS_VER"
+              echo "WORKING_BUILD_TOOLS_VERSION=$BUILD_TOOLS_VER" >> $GITHUB_ENV
               break
-            else
-              echo "⚠️ aidl exists but not working in version $version"
             fi
-          else
-            echo "❌ aidl not found in build-tools/$version"
           fi
         done
         
-        if [ -z "$AIDL_FOUND" ]; then
-          echo "❌ CRITICAL: No working aidl found!"
-          echo "Searching for aidl globally:"
+        # Install other components
+        $SDKMANAGER --install "platform-tools" --verbose || echo "Platform-tools install failed"
+        $SDKMANAGER --install "platforms;android-31" --verbose || echo "Platform install failed"
+        $SDKMANAGER --install "ndk;25.1.8937393" --verbose || echo "NDK install failed"
+        
+        # Final verification
+        echo "=== Final aidl Verification ==="
+        WORKING_VERSION=${WORKING_BUILD_TOOLS_VERSION:-}
+        
+        if [ -n "$WORKING_VERSION" ]; then
+          AIDL_PATH="$ANDROID_SDK_ROOT/build-tools/$WORKING_VERSION/aidl"
+          echo "✅ Using aidl from build-tools version: $WORKING_VERSION"
+          ls -la "$AIDL_PATH"
+        else
+          echo "❌ CRITICAL: No working aidl found in any build-tools version!"
+          
+          # Last resort: global search and manual check
+          echo "Performing global search for aidl..."
           find $ANDROID_SDK_ROOT -name "aidl" -type f -exec ls -la {} \; 2>/dev/null || echo "No aidl found anywhere"
+          
+          # List what we actually have in build-tools
+          echo "Available build-tools directories:"
+          ls -la $ANDROID_SDK_ROOT/build-tools/ 2>/dev/null || echo "No build-tools directory"
+          
+          for dir in $ANDROID_SDK_ROOT/build-tools/*/; do
+            if [ -d "$dir" ]; then
+              echo "Contents of $dir:"
+              ls -la "$dir" | head -10
+            fi
+          done
+          
           exit 1
         fi
         
         echo "✅ Android SDK setup completed successfully"
+        
+    - name: Alternative aidl installation (if needed)
+      run: |
+        echo "=== Checking if alternative aidl installation is needed ==="
+        
+        WORKING_VERSION=${WORKING_BUILD_TOOLS_VERSION:-}
+        
+        if [ -z "$WORKING_VERSION" ]; then
+          echo "No working aidl found, trying alternative methods..."
+          
+          # Method 1: Force clean reinstall
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          
+          echo "Method 1: Clean reinstall of build-tools"
+          $SDKMANAGER --uninstall "build-tools;31.0.0" 2>/dev/null || true
+          $SDKMANAGER --install "build-tools;31.0.0" --verbose
+          
+          if [ -f "$ANDROID_SDK_ROOT/build-tools/31.0.0/aidl" ]; then
+            chmod +x "$ANDROID_SDK_ROOT/build-tools/31.0.0/aidl"
+            if "$ANDROID_SDK_ROOT/build-tools/31.0.0/aidl" --help >/dev/null 2>&1; then
+              echo "✅ Clean reinstall successful"
+              echo "WORKING_BUILD_TOOLS_VERSION=31.0.0" >> $GITHUB_ENV
+              exit 0
+            fi
+          fi
+          
+          # Method 2: Try older stable version
+          echo "Method 2: Installing build-tools 29.0.3"
+          $SDKMANAGER --install "build-tools;29.0.3" --verbose
+          
+          if [ -f "$ANDROID_SDK_ROOT/build-tools/29.0.3/aidl" ]; then
+            chmod +x "$ANDROID_SDK_ROOT/build-tools/29.0.3/aidl"
+            if "$ANDROID_SDK_ROOT/build-tools/29.0.3/aidl" --help >/dev/null 2>&1; then
+              echo "✅ Older version installation successful"
+              echo "WORKING_BUILD_TOOLS_VERSION=29.0.3" >> $GITHUB_ENV
+              exit 0
+            fi
+          fi
+          
+          echo "❌ All alternative methods failed"
+          exit 1
+        else
+          echo "✅ Working aidl already found in version: $WORKING_VERSION"
+        fi
         
     - name: Update PATH with working build-tools
       run: |
