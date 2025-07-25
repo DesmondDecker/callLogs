@@ -113,18 +113,23 @@ EOF
         
     - name: Rename main Python file
       run: |
+        # Buildozer expects main.py by default
         if [ -f paste.txt ]; then
           mv paste.txt main.py
         fi
         
     - name: Setup Buildozer
       run: |
+        # Create buildozer global directory
         mkdir -p .buildozer_global
         export BUILDOZER_GLOBAL_DIR=$(pwd)/.buildozer_global
         
+        # Check if buildozer.spec exists and validate it
         if [ -f buildozer.spec ]; then
           echo "Checking buildozer.spec for duplicate sections..."
-          if python3 -c "import configparser
+          # Check for duplicate sections using a properly formatted Python script
+          python3 - <<'END_SCRIPT'
+import configparser
 try:
     config = configparser.ConfigParser()
     config.read('buildozer.spec')
@@ -132,18 +137,22 @@ try:
 except configparser.DuplicateSectionError as e:
     print(f'Error: {e}')
     exit(1)
-"; then
-            echo "buildozer.spec is valid"
-          else
+END_SCRIPT
+
+          if [ $? -ne 0 ]; then
             echo "buildozer.spec has errors, recreating..."
             rm buildozer.spec
+          else
+            echo "buildozer.spec is valid"
           fi
         fi
         
+        # Initialize buildozer if spec doesn't exist or was removed
         if [ ! -f buildozer.spec ]; then
           echo "Creating new buildozer.spec..."
           buildozer init
           
+          # Update spec with our settings
           sed -i 's/title = My Application/title = Call Log Sync/' buildozer.spec
           sed -i 's/package.name = myapp/package.name = calllogsync/' buildozer.spec
           sed -i 's/package.domain = org.example/package.domain = com.kortahun/' buildozer.spec
@@ -173,6 +182,7 @@ except configparser.DuplicateSectionError as e:
         export ANDROIDAPI=33
         export NDKAPI=21
         
+        # Enable ccache for faster builds
         export USE_CCACHE=1
         export NDK_CCACHE=$(which ccache)
         
@@ -187,6 +197,7 @@ except configparser.DuplicateSectionError as e:
         export ANDROIDAPI=33
         export NDKAPI=21
         
+        # Enable ccache for faster builds
         export USE_CCACHE=1
         export NDK_CCACHE=$(which ccache)
         
@@ -196,20 +207,25 @@ except configparser.DuplicateSectionError as e:
       if: steps.build_type.outputs.type == 'release' && secrets.KEYSTORE_BASE64 != ''
       run: |
         echo "Signing APK..."
+        
+        # Decode keystore
         echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
         
+        # Find the unsigned APK
         UNSIGNED_APK=$(find bin -name "*-release-unsigned.apk" -type f | head -1)
         if [ -z "$UNSIGNED_APK" ]; then
           echo "No unsigned APK found"
           exit 1
         fi
         
+        # Sign the APK
         jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
           -keystore release.keystore \
           -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
           -keypass "${{ secrets.KEY_PASSWORD }}" \
           "$UNSIGNED_APK" "${{ secrets.KEY_ALIAS }}"
           
+        # Align the APK
         zipalign -v 4 \
           "$UNSIGNED_APK" \
           bin/calllogsync-release-signed.apk
@@ -219,6 +235,7 @@ except configparser.DuplicateSectionError as e:
     - name: Find APK files
       id: find_apk
       run: |
+        # Find the built APK files
         if [ "${{ steps.build_type.outputs.type }}" == "release" ]; then
           if [ -f bin/calllogsync-release-signed.apk ]; then
             echo "apk_path=bin/calllogsync-release-signed.apk" >> $GITHUB_OUTPUT
@@ -229,7 +246,7 @@ except configparser.DuplicateSectionError as e:
               APK_FILE=$(find bin -name "*.apk" -type f | head -1)
             fi
             echo "apk_path=$APK_FILE" >> $GITHUB_OUTPUT
-            echo "apk_name=$(basename $APK_FILE)" >> $GITHUB_OUTPUT
+            echo "apk_name=$(basename "$APK_FILE")" >> $GITHUB_OUTPUT
           fi
         else
           APK_FILE=$(find bin -name "*debug*.apk" -type f | head -1)
@@ -237,9 +254,10 @@ except configparser.DuplicateSectionError as e:
             APK_FILE=$(find bin -name "*.apk" -type f | head -1)
           fi
           echo "apk_path=$APK_FILE" >> $GITHUB_OUTPUT
-          echo "apk_name=$(basename $APK_FILE)" >> $GITHUB_OUTPUT
+          echo "apk_name=$(basename "$APK_FILE")" >> $GITHUB_OUTPUT
         fi
         
+        # Verify APK was found
         if [ -z "$(grep apk_path $GITHUB_OUTPUT)" ]; then
           echo "No APK file found!"
           find bin -name "*.apk" -type f || echo "No APK files in bin directory"
@@ -273,21 +291,30 @@ except configparser.DuplicateSectionError as e:
         body: |
           # Call Log Sync Android App - ${GITHUB_REF#refs/tags/}
           
-          ## Features
-          - Call log synchronization
+          ## 📱 What's New
+          - Android Call Log synchronization
           - Real-time backend sync
-          - Error handling
-          - Multiple backend support
+          - Robust error handling and retry logic
+          - Multiple backend URL support
           
-          ## Requirements
-          - Android 5.0+
-          - Permissions: Call Log, Phone State, Contacts
+          ## 📋 Features
+          - ✅ Native Android call log access
+          - ✅ Automatic device registration  
+          - ✅ Background synchronization
+          - ✅ Connection testing and diagnostics
+          - ✅ Real-time status updates
           
-          ## Installation
-          1. Download APK
-          2. Enable unknown sources
-          3. Install APK
-          4. Grant permissions
+          ## 🔧 Requirements
+          - Android 5.0+ (API 21+)
+          - Permissions: Call Log, Phone State, Contacts, Internet
+          
+          ## 📥 Installation
+          1. Download the APK file below
+          2. Enable "Install from unknown sources" in Android settings
+          3. Install the APK
+          4. Grant required permissions when prompted
+          
+          Built with ❤️ using Kivy and Python
         draft: false
         prerelease: false
       env:
@@ -302,12 +329,22 @@ except configparser.DuplicateSectionError as e:
             issue_number: context.issue.number,
             owner: context.repo.owner,
             repo: context.repo.repo,
-            body: `🎉 Build Successful!
+            body: `🎉 **Build Successful!**
+            
+            The Android APK has been built successfully for this PR.
             
             **Build Type:** ${{ steps.build_type.outputs.type }}
             **APK:** ${{ steps.find_apk.outputs.apk_name }}
             
-            Download from Artifacts section.`
+            You can download the APK from the "Artifacts" section of this build.
+            
+            **Next Steps:**
+            1. Download and test the APK on your Android device
+            2. Verify all permissions are working correctly
+            3. Test the sync functionality with your backend
+            
+            ---
+            *This APK is for testing purposes only.*`
           })
 
   test:
@@ -330,6 +367,7 @@ except configparser.DuplicateSectionError as e:
         
     - name: Run tests
       run: |
+        # Create a simple test if none exist
         if [ ! -d tests ]; then
           mkdir tests
           cat > tests/test_basic.py << 'EOF'
@@ -337,10 +375,12 @@ import unittest
 import sys
 import os
 
+# Add the parent directory to the path so we can import our app
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 class TestBasic(unittest.TestCase):
     def test_imports(self):
+        """Test that we can import the main modules"""
         try:
             import kivy
             import requests
