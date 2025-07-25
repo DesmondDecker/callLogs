@@ -119,97 +119,184 @@ jobs:
         echo "=== Initializing buildozer to create directory structure ==="
         buildozer android debug --verbose || echo "First run completed (expected to possibly fail)"
         
-    - name: Install Android SDK components to buildozer location
+    - name: Setup Android SDK with comprehensive fallbacks
       run: |
-        # Define the buildozer SDK path
+        # Define paths
         BUILDOZER_SDK_PATH="$HOME/.buildozer/android/platform/android-sdk"
         
-        echo "=== Installing Android SDK to buildozer location: $BUILDOZER_SDK_PATH ==="
+        echo "=== Setting up Android SDK at: $BUILDOZER_SDK_PATH ==="
         
         # Create SDK directory
         mkdir -p "$BUILDOZER_SDK_PATH"
         cd "$BUILDOZER_SDK_PATH"
         
-        # Download command line tools if not present
+        # Download command line tools with retries
         if [ ! -d "cmdline-tools" ]; then
           echo "Downloading Android command line tools..."
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-          unzip -q commandlinetools-linux-11076708_latest.zip
-          rm commandlinetools-linux-11076708_latest.zip
+          
+          # Try multiple download sources/versions
+          CMDTOOLS_URLS=(
+            "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+            "https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip"
+            "https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip"
+          )
+          
+          for url in "${CMDTOOLS_URLS[@]}"; do
+            echo "Trying download from: $url"
+            if wget -q "$url" -O cmdtools.zip; then
+              if unzip -q cmdtools.zip; then
+                rm cmdtools.zip
+                echo "✅ Successfully downloaded and extracted command line tools"
+                break
+              else
+                echo "❌ Failed to extract, trying next URL"
+                rm -f cmdtools.zip
+              fi
+            else
+              echo "❌ Failed to download, trying next URL"
+            fi
+          done
+          
+          # Verify we have cmdline-tools
+          if [ ! -d "cmdline-tools" ]; then
+            echo "❌ Failed to download command line tools from all sources"
+            exit 1
+          fi
           
           # Organize cmdline-tools properly
           mkdir -p cmdline-tools/latest
           mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
         fi
         
-        # Set up environment for SDK manager
+        # Set environment
         export ANDROID_SDK_ROOT="$BUILDOZER_SDK_PATH"
         export ANDROID_HOME="$BUILDOZER_SDK_PATH"
         export PATH="$PATH:$BUILDOZER_SDK_PATH/cmdline-tools/latest/bin"
         
         echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
-        echo "PATH includes: $BUILDOZER_SDK_PATH/cmdline-tools/latest/bin"
+        echo "Verifying sdkmanager..."
+        which sdkmanager || { echo "❌ sdkmanager not found"; exit 1; }
         
-        # Accept licenses
+        # Accept licenses with retries
         echo "Accepting Android SDK licenses..."
-        yes | sdkmanager --licenses >/dev/null 2>&1 || true
-        
-        # Install essential components
-        echo "Installing Android SDK components..."
-        sdkmanager --install \
-          "build-tools;33.0.2" \
-          "platform-tools" \
-          "platforms;android-33" \
-          "ndk;25.1.8937393" \
-          --verbose
-        
-        # Verify aidl installation
-        AIDL_PATH="$BUILDOZER_SDK_PATH/build-tools/33.0.2/aidl"
-        if [ -f "$AIDL_PATH" ]; then
-          chmod +x "$AIDL_PATH"
-          echo "✅ aidl found and made executable at: $AIDL_PATH"
-          ls -la "$AIDL_PATH"
-          
-          # Test aidl
-          if "$AIDL_PATH" --help >/dev/null 2>&1; then
-            echo "✅ aidl is working correctly"
+        for i in {1..3}; do
+          if yes | timeout 60 sdkmanager --licenses --sdk_root="$ANDROID_SDK_ROOT" >/dev/null 2>&1; then
+            echo "✅ Licenses accepted"
+            break
           else
-            echo "⚠️ aidl executable but may have issues"
+            echo "⚠️ License acceptance attempt $i failed, retrying..."
+            sleep 2
           fi
+        done
+        
+        # Install components with comprehensive fallback strategy
+        echo "Installing Android SDK components..."
+        
+        # Define component lists in order of preference
+        BUILD_TOOLS_VERSIONS=("33.0.2" "33.0.1" "33.0.0" "32.0.0" "31.0.0")
+        PLATFORM_VERSIONS=("android-33" "android-32" "android-31")
+        NDK_VERSIONS=("25.1.8937393" "25.0.8775105" "24.0.8215888")
+        
+        # Install platform-tools first (most reliable)
+        echo "Installing platform-tools..."
+        sdkmanager --install "platform-tools" --sdk_root="$ANDROID_SDK_ROOT" --verbose
+        
+        # Try build-tools versions until one works
+        BUILD_TOOLS_SUCCESS=""
+        for version in "${BUILD_TOOLS_VERSIONS[@]}"; do
+          echo "Attempting to install build-tools;$version..."
+          if sdkmanager --install "build-tools;$version" --sdk_root="$ANDROID_SDK_ROOT" --verbose; then
+            # Verify aidl exists
+            if [ -f "$ANDROID_SDK_ROOT/build-tools/$version/aidl" ]; then
+              chmod +x "$ANDROID_SDK_ROOT/build-tools/$version/aidl"
+              if "$ANDROID_SDK_ROOT/build-tools/$version/aidl" --help >/dev/null 2>&1; then
+                echo "✅ Successfully installed working build-tools;$version"
+                BUILD_TOOLS_SUCCESS="$version"
+                echo "BUILD_TOOLS_VERSION=$version" >> $GITHUB_ENV
+                break
+              else
+                echo "⚠️ build-tools;$version installed but aidl not working"
+              fi
+            else
+              echo "⚠️ build-tools;$version installed but aidl not found"
+            fi
+          else
+            echo "❌ Failed to install build-tools;$version"
+          fi
+        done
+        
+        if [ -z "$BUILD_TOOLS_SUCCESS" ]; then
+          echo "❌ Failed to install any working build-tools version"
+          exit 1
+        fi
+        
+        # Install platform
+        PLATFORM_SUCCESS=""
+        for platform in "${PLATFORM_VERSIONS[@]}"; do
+          echo "Attempting to install platforms;$platform..."
+          if sdkmanager --install "platforms;$platform" --sdk_root="$ANDROID_SDK_ROOT" --verbose; then
+            echo "✅ Successfully installed $platform"
+            PLATFORM_SUCCESS="$platform"
+            break
+          fi
+        done
+        
+        # Install NDK (optional, continue if fails)
+        for ndk in "${NDK_VERSIONS[@]}"; do
+          echo "Attempting to install ndk;$ndk..."
+          if sdkmanager --install "ndk;$ndk" --sdk_root="$ANDROID_SDK_ROOT" --verbose; then
+            echo "✅ Successfully installed ndk;$ndk"
+            break
+          else
+            echo "⚠️ Failed to install ndk;$ndk, trying next..."
+          fi
+        done
+        
+        # Final verification
+        echo "=== Installation Summary ==="
+        echo "Build-tools version: $BUILD_TOOLS_SUCCESS"
+        echo "Platform: $PLATFORM_SUCCESS"
+        echo "SDK contents:"
+        ls -la "$ANDROID_SDK_ROOT/"
+        echo "Build-tools contents:"
+        ls -la "$ANDROID_SDK_ROOT/build-tools/"
+        echo "Specific build-tools version contents:"
+        ls -la "$ANDROID_SDK_ROOT/build-tools/$BUILD_TOOLS_SUCCESS/"
+        
+        # Test final aidl
+        AIDL_PATH="$ANDROID_SDK_ROOT/build-tools/$BUILD_TOOLS_SUCCESS/aidl"
+        echo "Testing aidl at: $AIDL_PATH"
+        if [ -f "$AIDL_PATH" ] && "$AIDL_PATH" --help >/dev/null 2>&1; then
+          echo "✅ Final aidl verification successful"
         else
-          echo "❌ aidl not found at expected location: $AIDL_PATH"
-          
-          # Debug: show what's in build-tools
-          echo "Contents of build-tools directory:"
-          ls -la "$BUILDOZER_SDK_PATH/build-tools/" 2>/dev/null || echo "build-tools directory not found"
-          
-          # Look for aidl anywhere
-          echo "Searching for aidl in buildozer SDK:"
-          find "$BUILDOZER_SDK_PATH" -name "aidl" -type f 2>/dev/null || echo "No aidl found"
-          
+          echo "❌ Final aidl verification failed"
           exit 1
         fi
         
     - name: Build APK
       run: |
-        # Set environment for buildozer
+        # Set environment
         export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
         export ANDROID_SDK_ROOT="$HOME/.buildozer/android/platform/android-sdk"
         export ANDROID_HOME="$ANDROID_SDK_ROOT"
-        export PATH="$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/build-tools/33.0.2"
+        
+        # Use the build-tools version that was successfully installed
+        BUILD_TOOLS_VER=${BUILD_TOOLS_VERSION:-33.0.2}
+        export PATH="$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/build-tools/$BUILD_TOOLS_VER"
         
         echo "=== Final build environment ==="
         echo "JAVA_HOME: $JAVA_HOME"
         echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+        echo "BUILD_TOOLS_VERSION: $BUILD_TOOLS_VER"
         echo "Java version:"
         java -version
         
-        # Final aidl check
-        AIDL_PATH="$ANDROID_SDK_ROOT/build-tools/33.0.2/aidl"
+        # Final environment check
+        AIDL_PATH="$ANDROID_SDK_ROOT/build-tools/$BUILD_TOOLS_VER/aidl"
         if [ -f "$AIDL_PATH" ]; then
-          echo "✅ Final aidl check passed: $AIDL_PATH"
+          echo "✅ Build environment ready - aidl found at: $AIDL_PATH"
         else
-          echo "❌ Final aidl check failed"
+          echo "❌ Build environment check failed - aidl not found"
           exit 1
         fi
         
