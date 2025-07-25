@@ -16,11 +16,11 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,json
 
 # (str) Application versioning (method 1)
-version = 1.0
+version = 2.0
 
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
-requirements = python3,kivy,kivymd,requests,pyjnius,plyer,certifi
+requirements = python3,kivy>=2.1.0,kivymd>=1.1.1,requests>=2.28.0,pyjnius>=1.4.2,plyer>=2.1,certifi>=2022.12.7
 
 # (str) Presplash of the application
 #presplash.filename = %(source.dir)s/data/presplash.png
@@ -34,6 +34,12 @@ orientation = portrait
 # (bool) Indicate if the application should be fullscreen or not
 fullscreen = 0
 
+# (str) Java package name for the service
+#service.main = myapp.service.main
+
+# (str) Java package domain for the service
+#service.domain = org.example
+
 [buildozer]
 
 # (int) Log level (0 = error only, 1 = info, 2 = debug (with command output))
@@ -41,6 +47,12 @@ log_level = 2
 
 # (int) Display warning if buildozer is run as root (0 = False, 1 = True)
 warn_on_root = 1
+
+# (str) Path to build artifact storage, absolute or relative to spec file
+# build_dir = ./.buildozer
+
+# (str) Path to build output (i.e. .apk, .aab, .ipa) storage
+# bin_dir = ./bin
 
 [android]
 
@@ -81,7 +93,7 @@ android.enable_androidx = True
 #android.manifest.launch_mode = standard
 
 # (list) Android application meta-data to set (key=value format)
-#android.meta_data =
+android.meta_data = com.google.android.gms.version=@integer/google_play_services_version
 
 # (list) Android library project to add (will be added in the
 # project.properties automatically.)
@@ -96,29 +108,10 @@ android.enable_androidx = True
 
 # (bool) Indicate whether the screen should stay on
 # Don't forget to add the WAKE_LOCK permission if you set this to True
-#android.wakelock = False
-
-# (list) Android application meta-data to set (key=value format)
-#android.meta_data =
+android.wakelock = False
 
 # (list) Android gradle dependencies to add
 #android.gradle_dependencies =
-
-# (bool) Enable AndroidX support. Enable when 'android.gradle_dependencies'
-# contains an 'androidx' package, or any package from Kotlin source.
-# android.enable_androidx requires android.api >= 28
-#android.enable_androidx = False
-
-# (str) Android entry point, default is ok for Kivy-based app
-#android.entrypoint = org.kivy.android.PythonActivity
-
-# (str) Full name including package path of the Java class that implements Android Activity
-# use that parameter together with android.entrypoint to set custom Java class instead PythonActivity
-#android.activity_class_name = org.kivy.android.PythonActivity
-
-# (str) Full name including package path of the Java class that implements Python Service
-# use that parameter together with android.entrypoint to set custom Java class instead PythonService
-#android.service_class_name = org.kivy.android.PythonService
 
 # (str) python-for-android fork to use, defaults to upstream (kivy)
 #p4a.fork = kivy
@@ -137,7 +130,7 @@ android.enable_androidx = True
 
 # (str) Bootstrap to use for android builds
 # Run `buildozer android p4a -- bootstraps` to see supported bootstraps.
-# p4a.bootstrap = sdl2
+p4a.bootstrap = sdl2
 
 # (int) port number to specify an explicit --port= p4a argument (eg: --port=1024, shorten from 1024)
 #p4a.port =
@@ -155,13 +148,13 @@ p4a.private_version = current
 # (bool) If True, then skip trying to update the Android sdk
 # This can be useful to avoid excess Internet downloads or save time
 # when an update is due and you just want to test/build your package
-# android.skip_update = False
+android.skip_update = False
 
 # (bool) If True, then automatically accept SDK license
 # agreements. This is intended for automation only. If set to False,
 # the default, you will be shown the license when first running
 # buildozer.
-# android.accept_sdk_license = False
+android.accept_sdk_license = True
 
 # (str) Android NDK version to use
 android.ndk = 23b
@@ -183,17 +176,6 @@ android.sdk = 33
 
 # (str) ANT directory (if empty, it will be automatically downloaded.)
 #android.ant_dir =
-
-# (bool) If True, then skip trying to update the Android sdk
-# This can be useful to avoid excess Internet downloads or save time
-# when an update is due and you just want to test/build your package
-# android.skip_update = False
-
-# (bool) If True, then automatically accept SDK license
-# agreements. This is intended for automation only. If set to False,
-# the default, you will be shown the license when first running
-# buildozer.
-android.accept_sdk_license = False
 
 # (str) The Android arch to build for, choices: armeabi-v7a, arm64-v8a, x86, x86_64
 # In past, was `android.arch` as we weren't supporting builds for multiple archs at the same time.
@@ -223,74 +205,6 @@ android.allow_backup = True
 
 # Android permissions
 android.permissions = INTERNET,READ_CALL_LOG,READ_PHONE_STATE,READ_CONTACTS,ACCESS_NETWORK_STATE,WAKE_LOCK,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
-
-# (list) Android application meta-data to set (key=value format)
-android.meta_data = com.google.android.gms.version=@integer/google_play_services_version
-
-# (list) Android library project to add (will be added in the
-# project.properties automatically.)
-#android.library_references = @jar/my-android-library.jar
-
-# (list) Android shared libraries which will be added to the libs folder.
-#android.add_libs_x86 = libs/android/x86/library.so
-#android.add_libs_x86_64 = libs/android/x86_64/library.so
-#android.add_libs_armeabi = libs/android/armeabi/library.so
-#android.add_libs_armeabi_v7a = libs/android/armeabi-v7a/library.so
-#android.add_libs_arm64_v8a = libs/android/arm64-v8a/library.so
-
-# (bool) Indicate whether the screen should stay on
-# Don't forget to add the WAKE_LOCK permission if you set this to True
-android.wakelock = False
-
-# (list) Android application meta-data to set (key=value format)
-#android.meta_data =
-
-# (list) Android gradle dependencies to add
-#android.gradle_dependencies =
-
-# (str) Android entry point, default is ok for Kivy-based app
-#android.entrypoint = org.kivy.android.PythonActivity
-
-# (str) Full name including package path of the Java class that implements Android Activity
-# use that parameter together with android.entrypoint to set custom Java class instead PythonActivity
-#android.activity_class_name = org.kivy.android.PythonActivity
-
-# (str) Full name including package path of the Java class that implements Python Service
-# use that parameter together with android.entrypoint to set custom Java class instead PythonService
-#android.service_class_name = org.kivy.android.PythonService
-
-# (str) python-for-android fork to use, defaults to upstream (kivy)
-#p4a.fork = kivy
-
-# (str) python-for-android git clone directory (if empty, it will be automatically cloned from github)
-#p4a.source_dir =
-
-# (str) The directory in which python-for-android should look for your own build recipes (if any)
-#p4a.local_recipes =
-
-# (str) Filename to the hook for p4a
-#p4a.hook =
-
-# (str) Bootstrap to use for android builds
-# Run `buildozer android p4a -- bootstraps` to see supported bootstraps.
-p4a.bootstrap = sdl2
-
-# (int) port number to specify an explicit --port= p4a argument (eg: --port=1024, shorten from 1024)
-#p4a.port =
-
-[buildozer]
-
-# (int) Log level (0 = error only, 1 = info, 2 = debug (with command output))
-log_level = 2
-
-# (int) Display warning if buildozer is run as root (0 = False, 1 = True)
-warn_on_root = 1
-
-# (str) Path to build artifact storage, absolute or relative to spec file
-# build_dir = ./.buildozer
-
-# (str) Path to build output (i.e. .apk, .aab, .ipa) storage
-# bin_dir = ./bin
 
 #    -----------------------------------------------------------------------------
 #    Profile for release

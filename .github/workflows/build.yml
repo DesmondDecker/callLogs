@@ -14,8 +14,8 @@ on:
         default: 'debug'
         type: choice
         options:
-        - debug
-        - release
+          - debug
+          - release
 
 jobs:
   build:
@@ -100,37 +100,57 @@ jobs:
     - name: Create requirements.txt if not exists
       run: |
         if [ ! -f requirements.txt ]; then
-          cat > requirements.txt << EOF
-        python3
-        kivy>=2.1.0
-        kivymd>=1.1.1
-        requests>=2.28.0
-        pyjnius>=1.4.2
-        plyer>=2.1
-        certifi>=2022.12.7
-        EOF
+          cat > requirements.txt << 'EOF'
+python3
+kivy>=2.1.0
+kivymd>=1.1.1
+requests>=2.28.0
+pyjnius>=1.4.2
+plyer>=2.1
+certifi>=2022.12.7
+EOF
         fi
         
     - name: Rename main Python file
       run: |
-        # Buildozer expects main.py by default
         if [ -f paste.txt ]; then
           mv paste.txt main.py
         fi
         
     - name: Setup Buildozer
       run: |
-        # Create buildozer global directory
         mkdir -p .buildozer_global
         export BUILDOZER_GLOBAL_DIR=$(pwd)/.buildozer_global
         
-        # Initialize buildozer if spec doesn't exist
+        if [ -f buildozer.spec ]; then
+          echo "Checking buildozer.spec for duplicate sections..."
+          if python3 -c "import configparser
+try:
+    config = configparser.ConfigParser()
+    config.read('buildozer.spec')
+    print('buildozer.spec is valid')
+except configparser.DuplicateSectionError as e:
+    print(f'Error: {e}')
+    exit(1)
+"; then
+            echo "buildozer.spec is valid"
+          else
+            echo "buildozer.spec has errors, recreating..."
+            rm buildozer.spec
+          fi
+        fi
+        
         if [ ! -f buildozer.spec ]; then
+          echo "Creating new buildozer.spec..."
           buildozer init
-          # Update spec with our settings
+          
           sed -i 's/title = My Application/title = Call Log Sync/' buildozer.spec
           sed -i 's/package.name = myapp/package.name = calllogsync/' buildozer.spec
           sed -i 's/package.domain = org.example/package.domain = com.kortahun/' buildozer.spec
+          sed -i 's/# requirements = python3,kivy/requirements = python3,kivy>=2.1.0,kivymd>=1.1.1,requests>=2.28.0,pyjnius>=1.4.2,plyer>=2.1,certifi>=2022.12.7/' buildozer.spec
+          sed -i 's/# android.permissions = INTERNET/android.permissions = INTERNET,READ_CALL_LOG,READ_PHONE_STATE,READ_CONTACTS,ACCESS_NETWORK_STATE,WAKE_LOCK,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE/' buildozer.spec
+          sed -i 's/# android.accept_sdk_license = False/android.accept_sdk_license = True/' buildozer.spec
+          sed -i 's/version = 0.1/version = 2.0/' buildozer.spec
         fi
         
     - name: Determine build type
@@ -138,7 +158,7 @@ jobs:
       run: |
         if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
           echo "type=${{ github.event.inputs.build_type }}" >> $GITHUB_OUTPUT
-        elif [ "${{ github.ref_type }}" == "tag" ]; then
+        elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
           echo "type=release" >> $GITHUB_OUTPUT
         else
           echo "type=debug" >> $GITHUB_OUTPUT
@@ -153,7 +173,6 @@ jobs:
         export ANDROIDAPI=33
         export NDKAPI=21
         
-        # Enable ccache for faster builds
         export USE_CCACHE=1
         export NDK_CCACHE=$(which ccache)
         
@@ -168,50 +187,38 @@ jobs:
         export ANDROIDAPI=33
         export NDKAPI=21
         
-        # Enable ccache for faster builds
         export USE_CCACHE=1
         export NDK_CCACHE=$(which ccache)
         
         buildozer android release
         
     - name: Sign APK (Release only)
-      if: steps.build_type.outputs.type == 'release'
+      if: steps.build_type.outputs.type == 'release' && secrets.KEYSTORE_BASE64 != ''
       run: |
-        # Only run if we have signing secrets
-        if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
-          echo "Signing APK..."
-          
-          # Decode keystore
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
-          
-          # Find the unsigned APK
-          UNSIGNED_APK=$(find bin -name "*-release-unsigned.apk" -type f | head -1)
-          if [ -z "$UNSIGNED_APK" ]; then
-            echo "No unsigned APK found"
-            exit 1
-          fi
-          
-          # Sign the APK
-          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
-            -keystore release.keystore \
-            -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
-            -keypass "${{ secrets.KEY_PASSWORD }}" \
-            "$UNSIGNED_APK" "${{ secrets.KEY_ALIAS }}"
-            
-          # Align the APK
-          ${ANDROID_HOME}/build-tools/33.0.0/zipalign -v 4 \
-            "$UNSIGNED_APK" \
-            bin/calllogsync-release-signed.apk
-            
-          rm release.keystore
-        else
-          echo "No signing secrets found, skipping APK signing"
+        echo "Signing APK..."
+        echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+        
+        UNSIGNED_APK=$(find bin -name "*-release-unsigned.apk" -type f | head -1)
+        if [ -z "$UNSIGNED_APK" ]; then
+          echo "No unsigned APK found"
+          exit 1
         fi
+        
+        jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
+          -keystore release.keystore \
+          -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
+          -keypass "${{ secrets.KEY_PASSWORD }}" \
+          "$UNSIGNED_APK" "${{ secrets.KEY_ALIAS }}"
+          
+        zipalign -v 4 \
+          "$UNSIGNED_APK" \
+          bin/calllogsync-release-signed.apk
+        
+        rm release.keystore
         
     - name: Find APK files
       id: find_apk
       run: |
-        # Find the built APK files
         if [ "${{ steps.build_type.outputs.type }}" == "release" ]; then
           if [ -f bin/calllogsync-release-signed.apk ]; then
             echo "apk_path=bin/calllogsync-release-signed.apk" >> $GITHUB_OUTPUT
@@ -233,8 +240,7 @@ jobs:
           echo "apk_name=$(basename $APK_FILE)" >> $GITHUB_OUTPUT
         fi
         
-        # Verify APK was found
-        if [ -z "$(cat $GITHUB_OUTPUT | grep apk_path)" ]; then
+        if [ -z "$(grep apk_path $GITHUB_OUTPUT)" ]; then
           echo "No APK file found!"
           find bin -name "*.apk" -type f || echo "No APK files in bin directory"
           exit 1
@@ -259,38 +265,29 @@ jobs:
         if-no-files-found: ignore
         
     - name: Create Release
-      if: github.ref_type == 'tag' && steps.build_type.outputs.type == 'release'
+      if: startsWith(github.ref, 'refs/tags/') && steps.build_type.outputs.type == 'release'
       uses: softprops/action-gh-release@v2
       with:
         files: ${{ steps.find_apk.outputs.apk_path }}
-        name: Release ${{ github.ref_name }}
+        name: Release ${GITHUB_REF#refs/tags/}
         body: |
-          # Call Log Sync Android App - ${{ github.ref_name }}
+          # Call Log Sync Android App - ${GITHUB_REF#refs/tags/}
           
-          ## 📱 What's New
-          - Android Call Log synchronization
+          ## Features
+          - Call log synchronization
           - Real-time backend sync
-          - Robust error handling and retry logic
-          - Multiple backend URL support
+          - Error handling
+          - Multiple backend support
           
-          ## 📋 Features
-          - ✅ Native Android call log access
-          - ✅ Automatic device registration  
-          - ✅ Background synchronization
-          - ✅ Connection testing and diagnostics
-          - ✅ Real-time status updates
+          ## Requirements
+          - Android 5.0+
+          - Permissions: Call Log, Phone State, Contacts
           
-          ## 🔧 Requirements
-          - Android 5.0+ (API 21+)
-          - Permissions: Call Log, Phone State, Contacts, Internet
-          
-          ## 📥 Installation
-          1. Download the APK file below
-          2. Enable "Install from unknown sources" in Android settings
-          3. Install the APK
-          4. Grant required permissions when prompted
-          
-          Built with ❤️ using Kivy and Python
+          ## Installation
+          1. Download APK
+          2. Enable unknown sources
+          3. Install APK
+          4. Grant permissions
         draft: false
         prerelease: false
       env:
@@ -305,27 +302,17 @@ jobs:
             issue_number: context.issue.number,
             owner: context.repo.owner,
             repo: context.repo.repo,
-            body: `🎉 **Build Successful!**
-            
-            The Android APK has been built successfully for this PR.
+            body: `🎉 Build Successful!
             
             **Build Type:** ${{ steps.build_type.outputs.type }}
             **APK:** ${{ steps.find_apk.outputs.apk_name }}
             
-            You can download the APK from the "Artifacts" section of this build.
-            
-            **Next Steps:**
-            1. Download and test the APK on your Android device
-            2. Verify all permissions are working correctly
-            3. Test the sync functionality with your backend
-            
-            ---
-            *This APK is for testing purposes only.*`
+            Download from Artifacts section.`
           })
 
-  # Job to run tests (optional)
   test:
     runs-on: ubuntu-latest
+    needs: build
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -343,30 +330,27 @@ jobs:
         
     - name: Run tests
       run: |
-        # Create a simple test if none exist
         if [ ! -d tests ]; then
           mkdir tests
           cat > tests/test_basic.py << 'EOF'
-        import unittest
-        import sys
-        import os
+import unittest
+import sys
+import os
 
-        # Add the parent directory to the path so we can import our app
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-        class TestBasic(unittest.TestCase):
-            def test_imports(self):
-                """Test that we can import the main modules"""
-                try:
-                    import kivy
-                    import requests
-                    self.assertTrue(True)
-                except ImportError as e:
-                    self.fail(f"Import failed: {e}")
+class TestBasic(unittest.TestCase):
+    def test_imports(self):
+        try:
+            import kivy
+            import requests
+            self.assertTrue(True)
+        except ImportError as e:
+            self.fail(f"Import failed: {e}")
 
-        if __name__ == '__main__':
-            unittest.main()
-        EOF
+if __name__ == '__main__':
+    unittest.main()
+EOF
         fi
         
         python -m pytest tests/ -v --cov=. --cov-report=xml
