@@ -36,10 +36,10 @@ fullscreen = 0
 
 [android]
 # Android API settings - using stable, well-tested versions
-android.api = 31
+android.api = 33
 android.minapi = 21
 android.ndk = 25b
-android.sdk = 31
+android.sdk = 33
 
 # Explicit SDK and NDK paths - will be set by environment
 android.sdk_path = %(env:ANDROID_SDK_ROOT)s
