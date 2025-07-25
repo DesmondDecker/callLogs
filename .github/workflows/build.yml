@@ -22,6 +22,7 @@ jobs:
         
     - name: Setup Java JDK
       uses: actions/setup-java@v4
+      id: setup-java
       with:
         distribution: 'temurin'
         java-version: '17'
@@ -55,9 +56,18 @@ jobs:
           
     - name: Setup environment variables
       run: |
-        echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
+        # Use the Java installation from setup-java action
+        echo "JAVA_HOME=${{ steps.setup-java.outputs.path }}" >> $GITHUB_ENV
         echo "ANDROID_SDK_ROOT=$HOME/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
         echo "ANDROID_HOME=$HOME/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
+        
+    - name: Verify Java installation
+      run: |
+        echo "JAVA_HOME: $JAVA_HOME"
+        echo "Java version:"
+        java -version
+        echo "Java installation directory contents:"
+        ls -la "$JAVA_HOME" || echo "JAVA_HOME directory not accessible"
         
     - name: Cache Buildozer global directory
       uses: actions/cache@v4
@@ -264,9 +274,10 @@ jobs:
         echo "ANDROID_HOME: $ANDROID_HOME"
         echo "WORKING_BUILD_TOOLS_VERSION: ${WORKING_BUILD_TOOLS_VERSION:-33.0.2}"
         
-        # Verify Java
+        # Verify Java installation and accessibility
         echo "Java version:"
         java -version
+        echo "JAVA_HOME directory exists: $([ -d "$JAVA_HOME" ] && echo "Yes" || echo "No")"
         
         # Verify Android SDK structure
         echo "SDK directory structure:"
@@ -300,6 +311,12 @@ jobs:
         echo "  ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
         echo "  ANDROID_HOME: $ANDROID_HOME"
         echo "  Working build-tools: ${WORKING_BUILD_TOOLS_VERSION:-33.0.2}"
+        
+        # Verify Java is accessible
+        if [ ! -d "$JAVA_HOME" ]; then
+          echo "❌ JAVA_HOME directory does not exist: $JAVA_HOME"
+          exit 1
+        fi
         
         # Verify aidl one more time before building
         WORKING_VERSION=${WORKING_BUILD_TOOLS_VERSION:-33.0.2}
