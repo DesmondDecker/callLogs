@@ -71,13 +71,19 @@ jobs:
           zlib1g-dev \
           libncurses5-dev \
           libncursesw5-dev \
-          libtinfo5 \
+          libtinfo6 \
           cmake \
           libffi-dev \
           libssl-dev \
           unzip \
           zip \
-          ccache
+          ccache \
+          libncurses6 \
+          libc6-dev \
+          libreadline-dev \
+          libsqlite3-dev \
+          libbz2-dev \
+          liblzma-dev
           
     - name: Set up Java environment
       run: |
