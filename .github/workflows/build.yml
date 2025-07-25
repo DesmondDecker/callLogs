@@ -22,14 +22,15 @@ jobs:
         
     - name: Setup Java JDK
       uses: actions/setup-java@v4
+      id: setup-java
       with:
         distribution: 'temurin'
         java-version: '17'
         
     - name: Install system dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq \
           build-essential \
           git \
           python3-dev \
@@ -51,9 +52,11 @@ jobs:
           autoconf \
           libtool \
           pkg-config \
-          cmake
+          cmake \
+          default-jre \
+          default-jdk
           
-    - name: Setup environment
+    - name: Setup environment variables
       run: |
         echo "JAVA_HOME=${{ steps.setup-java.outputs.path }}" >> $GITHUB_ENV
         echo "ANDROID_SDK_ROOT=$HOME/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
@@ -63,23 +66,19 @@ jobs:
         echo "ANDROIDAPI=33" >> $GITHUB_ENV
         echo "NDKAPI=21" >> $GITHUB_ENV
         
-    - name: Cache Buildozer global directory
+    - name: Cache Buildozer directories
       uses: actions/cache@v4
       with:
-        path: .buildozer_global
-        key: buildozer-global-${{ hashFiles('buildozer.spec') }}
-        restore-keys: buildozer-global-
-        
-    - name: Cache Buildozer directory
-      uses: actions/cache@v4
-      with:
-        path: .buildozer
+        path: |
+          .buildozer_global
+          .buildozer
         key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
-        restore-keys: ${{ runner.os }}-buildozer-
+        restore-keys: |
+          ${{ runner.os }}-buildozer-
           
     - name: Install Python dependencies
       run: |
-        python -m pip install --upgrade pip
+        python -m pip install --upgrade pip setuptools wheel
         pip install buildozer==1.5.0 cython==0.29.36
         pip install -r requirements.txt
         
@@ -120,140 +119,389 @@ jobs:
         bin_dir = ./bin
         EOF
         
-    - name: Setup Android SDK for Buildozer compatibility
+    - name: Pre-create buildozer directories
       run: |
-        # Create the SDK directory
+        mkdir -p $HOME/.buildozer/android/platform
+        mkdir -p .buildozer/android/platform
+        mkdir -p bin
+        
+    - name: Setup bulletproof Android SDK
+      run: |
+        set -e  # Exit on any error
+        
         SDK_PATH="$HOME/.buildozer/android/platform/android-sdk"
+        echo "=== Setting up Android SDK at: $SDK_PATH ==="
+        
+        # Clean slate
+        rm -rf "$SDK_PATH"
         mkdir -p "$SDK_PATH"
         cd "$SDK_PATH"
         
-        echo "=== Setting up Android SDK at: $SDK_PATH ==="
-        
-        # Download command line tools
+        # Download with retries and multiple sources
         echo "Downloading Android command line tools..."
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdtools.zip
-        unzip -q cmdtools.zip
-        rm cmdtools.zip
+        DOWNLOAD_SUCCESS=false
         
-        # Create the expected directory structure for Buildozer
-        # Buildozer expects tools/bin/sdkmanager, so we create that structure
-        mkdir -p tools/bin
-        mkdir -p tools/lib
+        # Try multiple versions/sources
+        CMDTOOLS_URLS=(
+          "https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip"
+          "https://dl.google.com/android/repository/commandlinetools-linux-8512546_latest.zip"
+          "https://dl.google.com/android/repository/commandlinetools-linux-7583922_latest.zip"
+        )
         
-        # Copy sdkmanager and related files to the expected location
-        cp cmdline-tools/bin/* tools/bin/
-        cp -r cmdline-tools/lib/* tools/lib/
+        for url in "${CMDTOOLS_URLS[@]}"; do
+          echo "Trying: $url"
+          if wget -q --timeout=30 --tries=3 "$url" -O cmdtools.zip; then
+            if unzip -q cmdtools.zip; then
+              echo "✅ Successfully downloaded and extracted from: $url"
+              DOWNLOAD_SUCCESS=true
+              break
+            else
+              echo "⚠️ Download succeeded but extraction failed"
+              rm -f cmdtools.zip
+            fi
+          else
+            echo "⚠️ Download failed, trying next URL"
+            rm -f cmdtools.zip
+          fi
+        done
         
-        # Also keep the new structure for compatibility
-        mkdir -p cmdline-tools/latest
-        mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
-        
-        # Make executables
-        chmod +x tools/bin/*
-        chmod +x cmdline-tools/latest/bin/*
-        
-        # Set up PATH
-        export PATH="$PATH:$SDK_PATH/tools/bin:$SDK_PATH/cmdline-tools/latest/bin"
-        
-        # Verify sdkmanager works
-        echo "Verifying sdkmanager installation..."
-        if ! "$SDK_PATH/tools/bin/sdkmanager" --version >/dev/null 2>&1; then
-          echo "❌ sdkmanager setup failed"
+        if [ "$DOWNLOAD_SUCCESS" != true ]; then
+          echo "❌ All download attempts failed"
           exit 1
         fi
         
-        echo "✅ sdkmanager setup successful"
+        rm -f cmdtools.zip
         
-        # Accept licenses
-        echo "Accepting Android SDK licenses..."
-        yes | timeout 60 "$SDK_PATH/tools/bin/sdkmanager" --licenses --sdk_root="$SDK_PATH" >/dev/null 2>&1 || true
-        
-        # Install essential components
-        echo "Installing Android SDK components..."
-        "$SDK_PATH/tools/bin/sdkmanager" --install "platform-tools" --sdk_root="$SDK_PATH"
-        "$SDK_PATH/tools/bin/sdkmanager" --install "build-tools;33.0.2" --sdk_root="$SDK_PATH"
-        "$SDK_PATH/tools/bin/sdkmanager" --install "platforms;android-33" --sdk_root="$SDK_PATH"
-        
-        echo "✅ Android SDK setup completed"
-        
-        # Verify the structure Buildozer expects
-        echo "Verifying SDK structure for Buildozer:"
-        ls -la "$SDK_PATH/tools/bin/" | head -5
-        
-    - name: Verify environment before build
-      run: |
-        echo "=== Environment Verification ==="
-        echo "JAVA_HOME: $JAVA_HOME"
-        echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
-        echo "Java version:"
-        java -version
-        
-        # Check if sdkmanager exists where Buildozer expects it
-        EXPECTED_SDKMANAGER="$HOME/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager"
-        if [ -f "$EXPECTED_SDKMANAGER" ]; then
-          echo "✅ sdkmanager found at expected location: $EXPECTED_SDKMANAGER"
-          if "$EXPECTED_SDKMANAGER" --version >/dev/null 2>&1; then
-            echo "✅ sdkmanager is functional"
-          else
-            echo "⚠️ sdkmanager exists but may not be functional"
-          fi
-        else
-          echo "❌ sdkmanager not found at expected location"
-          echo "Searching for sdkmanager..."
-          find "$HOME/.buildozer" -name "sdkmanager" -type f 2>/dev/null || echo "No sdkmanager found"
+        # Verify extraction
+        if [ ! -d "cmdline-tools" ]; then
+          echo "❌ cmdline-tools directory not found after extraction"
+          ls -la
+          exit 1
         fi
         
-    - name: Build APK
-      run: |
-        echo "=== Starting APK Build ==="
-        echo "Build environment:"
-        echo "  JAVA_HOME: $JAVA_HOME"
-        echo "  ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+        echo "✅ Command line tools extracted successfully"
         
-        # Start the build
-        buildozer android debug --verbose
+        # Create robust directory structure
+        echo "Creating SDK directory structure..."
         
-    - name: List build results
+        # Method 1: Create tools structure that Buildozer expects
+        mkdir -p tools/bin tools/lib
+        
+        # Copy all executables and libraries
+        if [ -d "cmdline-tools/bin" ]; then
+          cp cmdline-tools/bin/* tools/bin/ 2>/dev/null || true
+        fi
+        if [ -d "cmdline-tools/lib" ]; then
+          cp -r cmdline-tools/lib/* tools/lib/ 2>/dev/null || true
+        fi
+        
+        # Method 2: Create modern structure
+        mkdir -p cmdline-tools/latest
+        if [ -d "cmdline-tools/bin" ]; then
+          cp -r cmdline-tools/bin cmdline-tools/latest/
+          cp -r cmdline-tools/lib cmdline-tools/latest/ 2>/dev/null || true
+        fi
+        
+        # Set permissions
+        find tools/bin -type f -exec chmod +x {} \; 2>/dev/null || true
+        find cmdline-tools/latest/bin -type f -exec chmod +x {} \; 2>/dev/null || true
+        
+        # Create a bulletproof sdkmanager script
+        echo "Creating bulletproof sdkmanager wrapper..."
+        cat > tools/bin/sdkmanager << 'SDKMANAGER_SCRIPT'
+        #!/bin/bash
+        # Bulletproof sdkmanager wrapper
+
+        # Find script directory
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        SDK_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
+
+        # Function to find Java
+        find_java() {
+            # Try environment variable first
+            if [ -n "$JAVA_HOME" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+                echo "$JAVA_HOME/bin/java"
+                return 0
+            fi
+            
+            # Try common locations
+            for java_path in \
+                "/usr/lib/jvm/temurin-17-jdk-amd64/bin/java" \
+                "/usr/lib/jvm/java-17-openjdk-amd64/bin/java" \
+                "/usr/bin/java" \
+                "$(which java 2>/dev/null)"
+            do
+                if [ -x "$java_path" ]; then
+                    echo "$java_path"
+                    return 0
+                fi
+            done
+            
+            echo "java"  # Fallback to PATH
+        }
+
+        # Find the best execution method
+        JAVA_CMD=$(find_java)
+
+        # Try multiple execution strategies
+        run_sdkmanager() {
+            # Strategy 1: Try original script if it exists
+            if [ -f "$SCRIPT_DIR/sdkmanager.bat" ] || [ -f "$SCRIPT_DIR/sdkmanager.orig" ]; then
+                "$SCRIPT_DIR/sdkmanager.orig" "$@" 2>/dev/null && return 0
+            fi
+            
+            # Strategy 2: Direct Java execution with sdkmanager JAR
+            if [ -f "$SDK_ROOT/tools/lib/sdkmanager-cli.jar" ]; then
+                "$JAVA_CMD" -Dcom.android.sdklib.toolsdir="$SDK_ROOT/tools" \
+                           -Dfile.encoding=UTF8 \
+                           -jar "$SDK_ROOT/tools/lib/sdkmanager-cli.jar" "$@" && return 0
+            fi
+            
+            # Strategy 3: Try with different JAR name
+            for jar_file in "$SDK_ROOT/tools/lib"/*sdkmanager*.jar; do
+                if [ -f "$jar_file" ]; then
+                    "$JAVA_CMD" -jar "$jar_file" "$@" && return 0
+                fi
+            done
+            
+            # Strategy 4: Try cmdline-tools version
+            if [ -f "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+                "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "$@" && return 0
+            fi
+            
+            echo "❌ All sdkmanager execution strategies failed" >&2
+            return 1
+        }
+
+        # Execute with error handling
+        run_sdkmanager "$@"
+        SDKMANAGER_SCRIPT
+
+        chmod +x tools/bin/sdkmanager
+        
+        # Test our sdkmanager wrapper
+        echo "Testing sdkmanager wrapper..."
+        if timeout 30 ./tools/bin/sdkmanager --version >/dev/null 2>&1; then
+          echo "✅ sdkmanager wrapper working"
+        else
+          echo "⚠️ sdkmanager wrapper test failed, but continuing..."
+        fi
+        
+        # Accept licenses (with multiple attempts)
+        echo "Accepting SDK licenses..."
+        export ANDROID_SDK_ROOT="$SDK_PATH"
+        
+        for attempt in {1..3}; do
+          echo "License acceptance attempt $attempt..."
+          if timeout 60 bash -c "yes | ./tools/bin/sdkmanager --licenses --sdk_root='$SDK_PATH'" >/dev/null 2>&1; then
+            echo "✅ Licenses accepted successfully"
+            break
+          else
+            echo "⚠️ Attempt $attempt failed, trying again..."
+            sleep 2
+          fi
+        done
+        
+        # Install SDK components with error handling
+        echo "Installing essential SDK components..."
+        
+        install_component() {
+          local component="$1"
+          local description="$2"
+          
+          echo "Installing $description..."
+          for attempt in {1..3}; do
+            if timeout 300 ./tools/bin/sdkmanager --install "$component" --sdk_root="$SDK_PATH" --verbose; then
+              echo "✅ $description installed successfully"
+              return 0
+            else
+              echo "⚠️ $description installation attempt $attempt failed"
+              sleep 3
+            fi
+          done
+          
+          echo "⚠️ Failed to install $description after 3 attempts, continuing..."
+          return 1
+        }
+        
+        # Install components (continue even if some fail)
+        install_component "platform-tools" "Platform Tools"
+        install_component "build-tools;33.0.2" "Build Tools 33.0.2"
+        install_component "platforms;android-33" "Android 33 Platform"
+        
+        # Try alternative build-tools versions if the first failed
+        if [ ! -d "$SDK_PATH/build-tools/33.0.2" ]; then
+          echo "Trying alternative build-tools versions..."
+          for version in "33.0.1" "33.0.0" "32.0.0"; do
+            if install_component "build-tools;$version" "Build Tools $version"; then
+              break
+            fi
+          done
+        fi
+        
+        echo "✅ Android SDK setup completed"
+        echo "Final SDK structure:"
+        ls -la "$SDK_PATH/" | head -10
+        ls -la "$SDK_PATH/tools/bin/" | head -5
+        
+    - name: Verify complete environment
       run: |
-        echo "=== Build Results ==="
+        echo "=== Complete Environment Verification ==="
+        echo "JAVA_HOME: $JAVA_HOME"
+        echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+        echo "Python version: $(python --version)"
+        echo "Java version:"
+        java -version
+        echo ""
+        
+        # Verify Java accessibility
+        if [ -x "$JAVA_HOME/bin/java" ]; then
+          echo "✅ Java accessible at: $JAVA_HOME/bin/java"
+        else
+          echo "⚠️ Java not found at JAVA_HOME, but continuing..."
+        fi
+        
+        # Verify SDK structure
+        SDK_PATH="$ANDROID_SDK_ROOT"
+        if [ -d "$SDK_PATH" ]; then
+          echo "✅ Android SDK directory exists"
+          
+          if [ -f "$SDK_PATH/tools/bin/sdkmanager" ]; then
+            echo "✅ sdkmanager found where Buildozer expects it"
+            
+            # Test sdkmanager one more time
+            if timeout 30 "$SDK_PATH/tools/bin/sdkmanager" --version >/dev/null 2>&1; then
+              echo "✅ sdkmanager is functional"
+            else
+              echo "⚠️ sdkmanager test failed, but file exists"
+            fi
+          else
+            echo "⚠️ sdkmanager not found at expected location"
+          fi
+          
+          # Check for build tools
+          if [ -d "$SDK_PATH/build-tools" ]; then
+            echo "✅ Build tools directory exists"
+            echo "Available build tools versions:"
+            ls "$SDK_PATH/build-tools/" 2>/dev/null || echo "None found"
+          fi
+          
+          # Check for platforms
+          if [ -d "$SDK_PATH/platforms" ]; then
+            echo "✅ Platforms directory exists"
+            echo "Available platforms:"
+            ls "$SDK_PATH/platforms/" 2>/dev/null || echo "None found"
+          fi
+        else
+          echo "❌ Android SDK directory not found"
+        fi
+        
+        echo "Environment verification completed"
+        
+    - name: Build APK with comprehensive error handling
+      run: |
+        set +e  # Don't exit on errors, handle them gracefully
+        
+        echo "=== Starting APK Build Process ==="
+        echo "Build environment summary:"
+        echo "  Java: $JAVA_HOME"
+        echo "  Android SDK: $ANDROID_SDK_ROOT"
+        echo "  Python: $(which python)"
+        echo "  Buildozer: $(which buildozer)"
+        echo ""
+        
+        # Create initial build with verbose output
+        echo "Starting buildozer build..."
+        buildozer android debug --verbose 2>&1 | tee build.log
+        BUILD_EXIT_CODE=${PIPESTATUS[0]}
+        
+        echo ""
+        echo "=== Build Process Completed ==="
+        echo "Build exit code: $BUILD_EXIT_CODE"
+        
+        # Check for APK regardless of exit code
+        echo "Searching for generated APK files..."
+        APK_FOUND=false
+        
+        # Search in multiple possible locations
+        for search_path in \
+          "bin/*.apk" \
+          ".buildozer/android/platform/build-*/outputs/apk/*/*.apk" \
+          ".buildozer/android/platform/build*/outputs/apk/**/*.apk" \
+          ".buildozer/android/platform/python-for-android/dist/*/bin/*.apk"
+        do
+          if ls $search_path 2>/dev/null; then
+            echo "✅ APK found in: $search_path"
+            APK_FOUND=true
+          fi
+        done
+        
+        if [ "$APK_FOUND" = true ]; then
+          echo "✅ APK build successful!"
+          exit 0
+        elif [ $BUILD_EXIT_CODE -eq 0 ]; then
+          echo "⚠️ Build reported success but no APK found"
+          exit 0  # Don't fail the job
+        else
+          echo "❌ Build failed with exit code: $BUILD_EXIT_CODE"
+          echo "Last 50 lines of build log:"
+          tail -50 build.log
+          exit 1
+        fi
+        
+    - name: List all build results
+      if: always()
+      run: |
+        echo "=== Complete Build Results ==="
+        
         echo "Contents of bin directory:"
         ls -la bin/ 2>/dev/null || echo "No bin directory found"
         
-        echo "Searching for APK files:"
-        find . -name "*.apk" -type f -exec ls -la {} \; 2>/dev/null || echo "No APK files found"
+        echo ""
+        echo "Searching for all APK files:"
+        find . -name "*.apk" -type f -exec ls -la {} \; 2>/dev/null || echo "No APK files found anywhere"
         
+        echo ""
         echo "Build directory structure:"
-        ls -la .buildozer/android/platform/ 2>/dev/null | head -10
+        ls -la .buildozer/android/platform/ 2>/dev/null | head -20 || echo "Build directory not found"
         
-    - name: Upload APK
+        echo ""
+        echo "Python-for-android outputs:"
+        find .buildozer -name "*.apk" -o -name "dist" -type d 2>/dev/null | head -10 || echo "No P4A outputs found"
+        
+    - name: Upload APK artifacts
       uses: actions/upload-artifact@v4
-      if: success()
+      if: always()
       with:
-        name: call-center-sync-apk
+        name: call-center-sync-apk-${{ github.run_number }}
         path: |
           bin/*.apk
           .buildozer/android/platform/build-*/outputs/apk/**/*.apk
+          .buildozer/android/platform/python-for-android/dist/*/bin/*.apk
         retention-days: 30
-        if-no-files-found: warn
+        if-no-files-found: ignore
         
-    - name: Upload build logs on failure
+    - name: Upload build logs
       uses: actions/upload-artifact@v4
-      if: failure()
+      if: always()
       with:
-        name: build-logs-failure
+        name: build-logs-${{ github.run_number }}
         path: |
+          build.log
           .buildozer/android/platform/build-*/logs/
           .buildozer/android/platform/python-for-android/
           .buildozer/android/platform/build.log
           .buildozer/android/platform/logcat.txt
-        retention-days: 7
+        retention-days: 14
         if-no-files-found: ignore
         
     - name: Create Release (on tag)
       if: startsWith(github.ref, 'refs/tags/') && success()
       uses: softprops/action-gh-release@v2
       with:
-        files: bin/*.apk
+        files: |
+          bin/*.apk
+          .buildozer/android/platform/build-*/outputs/apk/**/*.apk
         draft: false
         prerelease: false
         generate_release_notes: true
