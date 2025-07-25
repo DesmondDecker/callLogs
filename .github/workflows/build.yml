@@ -146,8 +146,7 @@ jobs:
         DOWNLOAD_SUCCESS=false
         for url in "${CMDTOOLS_URLS[@]}"; do
           echo "Trying: $url"
-          if wget -q "$url" -O cmdtools.zip && unzip -q cmdtools.zip; then
-            rm cmdtools.zip
+          if wget -q "$url" -O cmdtools.zip; then
             echo "✅ Successfully downloaded command line tools"
             DOWNLOAD_SUCCESS=true
             break
@@ -162,85 +161,81 @@ jobs:
           exit 1
         fi
         
-        # Organize cmdline-tools properly - handle all possible zip structures
-        echo "=== Organizing cmdline-tools directory structure ==="
-        echo "Contents after extraction:"
-        ls -la .
+        # Simple and robust extraction to temp directory
+        echo "=== Extracting command line tools ==="
+        rm -rf tmp-cmdtools
+        mkdir tmp-cmdtools
+        unzip -q cmdtools.zip -d tmp-cmdtools
+        rm cmdtools.zip
         
-        # Create the target directory
-        rm -rf cmdline-tools/latest  # Clean any existing structure
-        mkdir -p cmdline-tools/latest
+        echo "Contents of extracted temp directory:"
+        ls -la tmp-cmdtools/
         
-        # Handle different possible zip structures
-        MOVED_SUCCESSFULLY=false
-        
-        if [ -d "cmdline-tools/bin" ]; then
-          echo "Found cmdline-tools with bin subdirectory, moving to latest/"
-          mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null && MOVED_SUCCESSFULLY=true
-        elif [ -d "cmdline-tools" ] && [ ! -d "cmdline-tools/latest" ]; then
-          echo "Found cmdline-tools directory, moving contents to latest/"
-          # Create latest first, then move
-          mkdir -p cmdline-tools/latest
-          mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null && MOVED_SUCCESSFULLY=true
-        elif [ -d "tools" ]; then
-          echo "Found old-style tools directory, moving to cmdline-tools/latest/"
-          mv tools/* cmdline-tools/latest/ 2>/dev/null && MOVED_SUCCESSFULLY=true
-        fi
-        
-        # If standard approaches failed, search for sdkmanager and reorganize around it
-        if [ "$MOVED_SUCCESSFULLY" = false ]; then
-          echo "Standard extraction failed, searching for sdkmanager binary..."
-          SDKMANAGER_PATH=$(find . -name "sdkmanager" -type f | head -1)
-          if [ -n "$SDKMANAGER_PATH" ]; then
-            echo "Found sdkmanager at: $SDKMANAGER_PATH"
-            BIN_DIR=$(dirname "$SDKMANAGER_PATH")
-            PARENT_DIR=$(dirname "$BIN_DIR")
-            echo "Moving contents from $PARENT_DIR to cmdline-tools/latest/"
-            cp -r "$PARENT_DIR"/* cmdline-tools/latest/ 2>/dev/null && MOVED_SUCCESSFULLY=true
+        # Move the tools to the correct location
+        echo "=== Organizing cmdline-tools structure ==="
+        if [ -d "tmp-cmdtools/cmdline-tools" ]; then
+          echo "Found cmdline-tools directory, moving to SDK root"
+          mv tmp-cmdtools/cmdline-tools "$ANDROID_SDK_ROOT/"
+          
+          # Ensure it's in the 'latest' subdirectory structure
+          if [ ! -d "$ANDROID_SDK_ROOT/cmdline-tools/latest" ]; then
+            echo "Creating latest subdirectory structure"
+            mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+            # Move all contents to latest (bin, lib, etc.)
+            mv "$ANDROID_SDK_ROOT/cmdline-tools"/* "$ANDROID_SDK_ROOT/cmdline-tools/latest/" 2>/dev/null || true
           fi
-        fi
-        
-        # Verify the move was successful
-        if [ "$MOVED_SUCCESSFULLY" = false ]; then
-          echo "❌ Failed to organize cmdline-tools structure"
-          echo "Final directory contents:"
-          ls -la .
+        elif [ -d "tmp-cmdtools/tools" ]; then
+          echo "Found old-style tools directory, organizing as cmdline-tools/latest"
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+          mv tmp-cmdtools/tools/* "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
+        else
+          echo "❌ Unexpected command line tools structure"
+          echo "Contents of tmp-cmdtools:"
+          ls -la tmp-cmdtools/
           exit 1
         fi
         
-        # Verify the final structure
-        echo "Final cmdline-tools structure:"
-        ls -la cmdline-tools/latest/ 2>/dev/null || echo "cmdline-tools/latest directory not found"
-        echo "Contents of cmdline-tools/latest/bin:"
-        ls -la cmdline-tools/latest/bin/ 2>/dev/null || echo "bin directory not found"
+        # Clean up temp directory
+        rm -rf tmp-cmdtools
         
-        # Set up PATH immediately after organizing cmdline-tools
+        # Mandatory verification - exit if structure is not correct
+        if [ ! -f "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+          echo "❌ CRITICAL: sdkmanager not found after extraction and organization"
+          echo "Expected location: $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          echo "Actual SDK structure:"
+          find "$ANDROID_SDK_ROOT" -type f -name "*" 2>/dev/null | head -20
+          exit 1
+        fi
+        
+        # Verify final structure
+        echo "✅ Successfully organized cmdline-tools structure:"
+        ls -la "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/" | head -10
+        
+        # Set up PATH and verify sdkmanager
         export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
         echo "Updated PATH: $PATH"
         
-        # Verify sdkmanager is accessible
-        echo "Verifying sdkmanager accessibility..."
-        if [ -f "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
-          echo "✅ sdkmanager found at correct location"
-          chmod +x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+        # Verify sdkmanager exists and is executable
+        SDKMANAGER_PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+        if [ -f "$SDKMANAGER_PATH" ]; then
+          echo "✅ sdkmanager found at: $SDKMANAGER_PATH"
+          chmod +x "$SDKMANAGER_PATH"
           
-          # Test sdkmanager works
-          if "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --version >/dev/null 2>&1; then
+          # Test sdkmanager functionality
+          if "$SDKMANAGER_PATH" --version >/dev/null 2>&1; then
             echo "✅ sdkmanager is functional"
           else
-            echo "⚠️ sdkmanager exists but may not be functional"
+            echo "⚠️ sdkmanager exists but may not be functional, continuing anyway"
           fi
         else
-          echo "❌ sdkmanager not found at expected location"
-          echo "Searching for sdkmanager..."
-          find "$ANDROID_SDK_ROOT" -name "sdkmanager" -type f 2>/dev/null || echo "No sdkmanager found anywhere"
-          echo "Contents of cmdline-tools/latest/bin:"
-          ls -la "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/" 2>/dev/null || echo "Directory doesn't exist"
+          echo "❌ sdkmanager not found at: $SDKMANAGER_PATH"
+          echo "Directory contents:"
+          ls -la "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/" 2>/dev/null || echo "bin directory doesn't exist"
           exit 1
         fi
         
-        # Also verify with 'which' command
-        echo "sdkmanager location check: $(which sdkmanager 2>/dev/null || echo 'not found in PATH')"
+        # Final verification with which command
+        echo "sdkmanager in PATH: $(which sdkmanager 2>/dev/null || echo 'not found')"
         
         echo "=== Accepting SDK Licenses ==="
         # Ensure PATH is set for sdkmanager operations
