@@ -162,16 +162,67 @@ jobs:
           exit 1
         fi
         
-        # Organize cmdline-tools properly
+        # Organize cmdline-tools properly - handle all possible zip structures
+        echo "=== Organizing cmdline-tools directory structure ==="
+        echo "Contents after extraction:"
+        ls -la .
+        
+        # Create the target directory
         mkdir -p cmdline-tools/latest
+        
+        # Handle different possible zip structures
         if [ -d "cmdline-tools/bin" ]; then
+          echo "Found cmdline-tools with bin subdirectory, moving to latest/"
           mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
+        elif [ -d "cmdline-tools" ] && [ ! -d "cmdline-tools/latest" ]; then
+          echo "Found cmdline-tools directory, moving contents to latest/"
+          mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
+        elif [ -d "tools" ]; then
+          echo "Found old-style tools directory, moving to cmdline-tools/latest/"
+          mv tools/* cmdline-tools/latest/ 2>/dev/null || true
+        else
+          echo "Unexpected directory structure, attempting to find bin directory..."
+          find . -name "sdkmanager" -type f 2>/dev/null | head -1 | while read sdkmanager_path; do
+            if [ -n "$sdkmanager_path" ]; then
+              bin_dir=$(dirname "$sdkmanager_path")
+              parent_dir=$(dirname "$bin_dir")
+              echo "Found sdkmanager at $sdkmanager_path, moving $parent_dir to cmdline-tools/latest/"
+              mv "$parent_dir"/* cmdline-tools/latest/ 2>/dev/null || true
+            fi
+          done
         fi
         
+        # Verify the structure is correct
+        echo "Final cmdline-tools structure:"
+        ls -la cmdline-tools/latest/ 2>/dev/null || echo "cmdline-tools/latest directory not found"
+        
         # Set up PATH for this step
-        export PATH="$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin"
+        export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
+        
+        # Verify sdkmanager is accessible
+        if [ -f "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+          echo "✅ sdkmanager found at correct location"
+          chmod +x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+        else
+          echo "❌ sdkmanager not found at expected location"
+          echo "Searching for sdkmanager..."
+          find "$ANDROID_SDK_ROOT" -name "sdkmanager" -type f 2>/dev/null || echo "No sdkmanager found anywhere"
+          exit 1
+        fi
         
         echo "=== Accepting SDK Licenses ==="
+        # Set PATH before accepting licenses
+        export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
+        
+        # Verify sdkmanager before proceeding
+        if ! command -v sdkmanager >/dev/null 2>&1; then
+          echo "❌ sdkmanager not in PATH"
+          echo "Current PATH: $PATH"
+          echo "Looking for sdkmanager..."
+          find "$ANDROID_SDK_ROOT" -name "sdkmanager" -type f 2>/dev/null || echo "No sdkmanager found"
+          exit 1
+        fi
+        
         # Accept licenses with multiple attempts
         for attempt in {1..5}; do
           echo "License acceptance attempt #$attempt"
@@ -185,6 +236,8 @@ jobs:
         done
         
         echo "=== Installing SDK Components ==="
+        # Ensure PATH is set for all SDK operations
+        export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
         
         # Install platform-tools first (most reliable)
         echo "Installing platform-tools..."
@@ -256,7 +309,17 @@ jobs:
         echo "=== Final SDK Setup Verification ==="
         echo "SDK Root: $ANDROID_SDK_ROOT"
         echo "Working Build Tools: $BUILD_TOOLS_SUCCESS"
-        echo "SDK structure:"
+        
+        # Verify critical paths
+        echo "Critical paths verification:"
+        echo "  sdkmanager: $(which sdkmanager 2>/dev/null || echo 'NOT FOUND')"
+        echo "  cmdline-tools structure:"
+        ls -la "$ANDROID_SDK_ROOT/cmdline-tools/" 2>/dev/null || echo "No cmdline-tools directory"
+        echo "  build-tools structure:"
+        ls -la "$ANDROID_SDK_ROOT/build-tools/" 2>/dev/null || echo "No build-tools directory"
+        
+        # Find all aidl locations
+        echo "All aidl locations in SDK:"
         find "$ANDROID_SDK_ROOT" -name "aidl" -type f 2>/dev/null || echo "No aidl found anywhere"
         
         echo "✅ Android SDK setup completed successfully"
@@ -264,7 +327,7 @@ jobs:
     - name: Update PATH for build
       run: |
         WORKING_VERSION=${WORKING_BUILD_TOOLS_VERSION:-33.0.2}
-        echo "PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/build-tools/$WORKING_VERSION" >> $GITHUB_ENV
+        echo "PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/build-tools/$WORKING_VERSION:$PATH" >> $GITHUB_ENV
         
     - name: Final environment verification
       run: |
