@@ -26,12 +26,12 @@ jobs:
       uses: actions/checkout@v4
       
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
         
     - name: Cache pip dependencies
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ~/.cache/pip
         key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
@@ -39,7 +39,7 @@ jobs:
           ${{ runner.os }}-pip-
           
     - name: Cache Buildozer global directory
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: .buildozer_global
         key: ${{ runner.os }}-buildozer-global-${{ hashFiles('buildozer.spec') }}
@@ -47,7 +47,7 @@ jobs:
           ${{ runner.os }}-buildozer-global-
           
     - name: Cache Buildozer directory
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: .buildozer
         key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}-${{ hashFiles('**/*.py') }}
@@ -64,7 +64,7 @@ jobs:
           python3-dev \
           python3-pip \
           python3-venv \
-          openjdk-11-jdk \
+          openjdk-17-jdk \
           autoconf \
           libtool \
           pkg-config \
@@ -81,8 +81,8 @@ jobs:
           
     - name: Set up Java environment
       run: |
-        echo "JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64" >> $GITHUB_ENV
-        echo "/usr/lib/jvm/java-11-openjdk-amd64/bin" >> $GITHUB_PATH
+        echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
+        echo "/usr/lib/jvm/java-17-openjdk-amd64/bin" >> $GITHUB_PATH
         
     - name: Install Python dependencies
       run: |
@@ -178,16 +178,23 @@ jobs:
           # Decode keystore
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
           
+          # Find the unsigned APK
+          UNSIGNED_APK=$(find bin -name "*-release-unsigned.apk" -type f | head -1)
+          if [ -z "$UNSIGNED_APK" ]; then
+            echo "No unsigned APK found"
+            exit 1
+          fi
+          
           # Sign the APK
           jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
             -keystore release.keystore \
             -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
             -keypass "${{ secrets.KEY_PASSWORD }}" \
-            bin/*.apk "${{ secrets.KEY_ALIAS }}"
+            "$UNSIGNED_APK" "${{ secrets.KEY_ALIAS }}"
             
           # Align the APK
           ${ANDROID_HOME}/build-tools/33.0.0/zipalign -v 4 \
-            bin/calllogsync-*-release-unsigned.apk \
+            "$UNSIGNED_APK" \
             bin/calllogsync-release-signed.apk
             
           rm release.keystore
@@ -204,18 +211,31 @@ jobs:
             echo "apk_path=bin/calllogsync-release-signed.apk" >> $GITHUB_OUTPUT
             echo "apk_name=calllogsync-release-signed.apk" >> $GITHUB_OUTPUT
           else
-            APK_FILE=$(find bin -name "*.apk" -type f | head -1)
+            APK_FILE=$(find bin -name "*release*.apk" -type f | head -1)
+            if [ -z "$APK_FILE" ]; then
+              APK_FILE=$(find bin -name "*.apk" -type f | head -1)
+            fi
             echo "apk_path=$APK_FILE" >> $GITHUB_OUTPUT
             echo "apk_name=$(basename $APK_FILE)" >> $GITHUB_OUTPUT
           fi
         else
           APK_FILE=$(find bin -name "*debug*.apk" -type f | head -1)
+          if [ -z "$APK_FILE" ]; then
+            APK_FILE=$(find bin -name "*.apk" -type f | head -1)
+          fi
           echo "apk_path=$APK_FILE" >> $GITHUB_OUTPUT
           echo "apk_name=$(basename $APK_FILE)" >> $GITHUB_OUTPUT
         fi
         
+        # Verify APK was found
+        if [ -z "$(cat $GITHUB_OUTPUT | grep apk_path)" ]; then
+          echo "No APK file found!"
+          find bin -name "*.apk" -type f || echo "No APK files in bin directory"
+          exit 1
+        fi
+        
     - name: Upload APK artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: android-apk-${{ steps.build_type.outputs.type }}
         path: ${{ steps.find_apk.outputs.apk_path }}
@@ -223,17 +243,18 @@ jobs:
         
     - name: Upload build logs
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: build-logs
         path: |
           .buildozer/android/platform/build-*/logs/
           .buildozer/android/platform/build-*/gradle-project/build/outputs/logs/
         retention-days: 7
+        if-no-files-found: ignore
         
     - name: Create Release
       if: github.ref_type == 'tag' && steps.build_type.outputs.type == 'release'
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         files: ${{ steps.find_apk.outputs.apk_path }}
         name: Release ${{ github.ref_name }}
@@ -271,7 +292,7 @@ jobs:
         
     - name: Comment on PR
       if: github.event_name == 'pull_request'
-      uses: actions/github-script@v6
+      uses: actions/github-script@v7
       with:
         script: |
           github.rest.issues.createComment({
@@ -304,7 +325,7 @@ jobs:
       uses: actions/checkout@v4
       
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
         
@@ -345,7 +366,7 @@ jobs:
         python -m pytest tests/ -v --cov=. --cov-report=xml
         
     - name: Upload coverage reports
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@v4
       with:
         file: ./coverage.xml
         flags: unittests
