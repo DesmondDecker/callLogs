@@ -168,50 +168,82 @@ jobs:
         ls -la .
         
         # Create the target directory
+        rm -rf cmdline-tools/latest  # Clean any existing structure
         mkdir -p cmdline-tools/latest
         
         # Handle different possible zip structures
+        MOVED_SUCCESSFULLY=false
+        
         if [ -d "cmdline-tools/bin" ]; then
           echo "Found cmdline-tools with bin subdirectory, moving to latest/"
-          mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
+          mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null && MOVED_SUCCESSFULLY=true
         elif [ -d "cmdline-tools" ] && [ ! -d "cmdline-tools/latest" ]; then
           echo "Found cmdline-tools directory, moving contents to latest/"
-          mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
+          # Create latest first, then move
+          mkdir -p cmdline-tools/latest
+          mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null && MOVED_SUCCESSFULLY=true
         elif [ -d "tools" ]; then
           echo "Found old-style tools directory, moving to cmdline-tools/latest/"
-          mv tools/* cmdline-tools/latest/ 2>/dev/null || true
-        else
-          echo "Unexpected directory structure, attempting to find bin directory..."
-          find . -name "sdkmanager" -type f 2>/dev/null | head -1 | while read sdkmanager_path; do
-            if [ -n "$sdkmanager_path" ]; then
-              bin_dir=$(dirname "$sdkmanager_path")
-              parent_dir=$(dirname "$bin_dir")
-              echo "Found sdkmanager at $sdkmanager_path, moving $parent_dir to cmdline-tools/latest/"
-              mv "$parent_dir"/* cmdline-tools/latest/ 2>/dev/null || true
-            fi
-          done
+          mv tools/* cmdline-tools/latest/ 2>/dev/null && MOVED_SUCCESSFULLY=true
         fi
         
-        # Verify the structure is correct
+        # If standard approaches failed, search for sdkmanager and reorganize around it
+        if [ "$MOVED_SUCCESSFULLY" = false ]; then
+          echo "Standard extraction failed, searching for sdkmanager binary..."
+          SDKMANAGER_PATH=$(find . -name "sdkmanager" -type f | head -1)
+          if [ -n "$SDKMANAGER_PATH" ]; then
+            echo "Found sdkmanager at: $SDKMANAGER_PATH"
+            BIN_DIR=$(dirname "$SDKMANAGER_PATH")
+            PARENT_DIR=$(dirname "$BIN_DIR")
+            echo "Moving contents from $PARENT_DIR to cmdline-tools/latest/"
+            cp -r "$PARENT_DIR"/* cmdline-tools/latest/ 2>/dev/null && MOVED_SUCCESSFULLY=true
+          fi
+        fi
+        
+        # Verify the move was successful
+        if [ "$MOVED_SUCCESSFULLY" = false ]; then
+          echo "❌ Failed to organize cmdline-tools structure"
+          echo "Final directory contents:"
+          ls -la .
+          exit 1
+        fi
+        
+        # Verify the final structure
         echo "Final cmdline-tools structure:"
         ls -la cmdline-tools/latest/ 2>/dev/null || echo "cmdline-tools/latest directory not found"
+        echo "Contents of cmdline-tools/latest/bin:"
+        ls -la cmdline-tools/latest/bin/ 2>/dev/null || echo "bin directory not found"
         
-        # Set up PATH for this step
+        # Set up PATH immediately after organizing cmdline-tools
         export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
+        echo "Updated PATH: $PATH"
         
         # Verify sdkmanager is accessible
+        echo "Verifying sdkmanager accessibility..."
         if [ -f "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
           echo "✅ sdkmanager found at correct location"
           chmod +x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          
+          # Test sdkmanager works
+          if "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --version >/dev/null 2>&1; then
+            echo "✅ sdkmanager is functional"
+          else
+            echo "⚠️ sdkmanager exists but may not be functional"
+          fi
         else
           echo "❌ sdkmanager not found at expected location"
           echo "Searching for sdkmanager..."
           find "$ANDROID_SDK_ROOT" -name "sdkmanager" -type f 2>/dev/null || echo "No sdkmanager found anywhere"
+          echo "Contents of cmdline-tools/latest/bin:"
+          ls -la "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/" 2>/dev/null || echo "Directory doesn't exist"
           exit 1
         fi
         
+        # Also verify with 'which' command
+        echo "sdkmanager location check: $(which sdkmanager 2>/dev/null || echo 'not found in PATH')"
+        
         echo "=== Accepting SDK Licenses ==="
-        # Set PATH before accepting licenses
+        # Ensure PATH is set for sdkmanager operations
         export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
         
         # Verify sdkmanager before proceeding
@@ -223,10 +255,12 @@ jobs:
           exit 1
         fi
         
-        # Accept licenses with multiple attempts
+        echo "Using sdkmanager at: $(which sdkmanager)"
+        
+        # Accept licenses with multiple attempts, using explicit path
         for attempt in {1..5}; do
           echo "License acceptance attempt #$attempt"
-          if timeout 120 bash -c 'yes | sdkmanager --licenses --sdk_root="$ANDROID_SDK_ROOT"' 2>/dev/null; then
+          if timeout 120 bash -c "yes | \"$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager\" --licenses --sdk_root=\"$ANDROID_SDK_ROOT\"" 2>/dev/null; then
             echo "✅ Licenses accepted successfully"
             break
           else
@@ -239,9 +273,9 @@ jobs:
         # Ensure PATH is set for all SDK operations
         export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
         
-        # Install platform-tools first (most reliable)
+        # Install platform-tools first (most reliable) - use explicit path
         echo "Installing platform-tools..."
-        sdkmanager --install "platform-tools" --sdk_root="$ANDROID_SDK_ROOT" --verbose
+        "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install "platform-tools" --sdk_root="$ANDROID_SDK_ROOT" --verbose
         
         # Try multiple build-tools versions until we get a working one with aidl
         BUILD_TOOLS_VERSIONS=("34.0.0" "33.0.3" "33.0.2" "33.0.1" "33.0.0" "32.0.0")
@@ -251,7 +285,7 @@ jobs:
           echo "=== Attempting build-tools;$version ==="
           
           # Install the build-tools version
-          if sdkmanager --install "build-tools;$version" --sdk_root="$ANDROID_SDK_ROOT" --verbose; then
+          if "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install "build-tools;$version" --sdk_root="$ANDROID_SDK_ROOT" --verbose; then
             echo "Build-tools $version installed, checking for aidl..."
             
             # Check if aidl exists and is executable
@@ -290,7 +324,7 @@ jobs:
         PLATFORM_VERSIONS=("android-34" "android-33" "android-32" "android-31")
         for platform in "${PLATFORM_VERSIONS[@]}"; do
           echo "Installing $platform..."
-          if sdkmanager --install "platforms;$platform" --sdk_root="$ANDROID_SDK_ROOT" --verbose; then
+          if "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install "platforms;$platform" --sdk_root="$ANDROID_SDK_ROOT" --verbose; then
             echo "✅ Successfully installed $platform"
             break
           fi
@@ -300,7 +334,7 @@ jobs:
         NDK_VERSIONS=("25.1.8937393" "25.0.8775105" "24.0.8215888")
         for ndk in "${NDK_VERSIONS[@]}"; do
           echo "Attempting NDK $ndk..."
-          if sdkmanager --install "ndk;$ndk" --sdk_root="$ANDROID_SDK_ROOT" --verbose; then
+          if "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ndk" --sdk_root="$ANDROID_SDK_ROOT" --verbose; then
             echo "✅ Successfully installed ndk;$ndk"
             break
           fi
@@ -323,6 +357,18 @@ jobs:
         find "$ANDROID_SDK_ROOT" -name "aidl" -type f 2>/dev/null || echo "No aidl found anywhere"
         
         echo "✅ Android SDK setup completed successfully"
+        
+    - name: Debug PATH and SDK tools
+      run: |
+        echo "=== PATH and SDK Tools Debug ==="
+        echo "Current PATH: $PATH"
+        echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+        echo "Looking for sdkmanager:"
+        which sdkmanager 2>/dev/null || echo "sdkmanager not found in PATH"
+        find "$ANDROID_SDK_ROOT" -name "sdkmanager" -type f 2>/dev/null || echo "No sdkmanager found in SDK"
+        
+        echo "Contents of cmdline-tools/latest/bin:"
+        ls -la "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/" 2>/dev/null || echo "Directory doesn't exist"
         
     - name: Update PATH for build
       run: |
