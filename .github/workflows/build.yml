@@ -18,7 +18,7 @@ jobs:
       uses: actions/checkout@v4
       
     - name: Setup Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.9'
         
@@ -31,11 +31,12 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
       with:
-        api-level: 33
-        build-tools: 33.0.0
+        api-level: 34
+        build-tools: 34.0.0
+        ndk-version: '25.2.9519653'
         
     - name: Cache buildozer global directory
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ~/.buildozer
         key: buildozer-global-${{ hashFiles('buildozer.spec') }}
@@ -43,7 +44,7 @@ jobs:
           buildozer-global-
           
     - name: Cache buildozer directory
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: .buildozer
         key: buildozer-${{ hashFiles('buildozer.spec') }}-${{ hashFiles('requirements.txt') }}
@@ -70,23 +71,32 @@ jobs:
           cmake \
           libffi-dev \
           libssl-dev \
-          ccache
+          ccache \
+          lld \
+          llvm
           
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install buildozer cython
+        pip install --upgrade buildozer cython
+        pip install -r requirements.txt
         
     - name: Setup Android environment variables
       run: |
         echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
         echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
         echo "JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64" >> $GITHUB_ENV
+        echo "NDK_VERSION=25.2.9519653" >> $GITHUB_ENV
+        
+    - name: Accept Android licenses
+      run: |
+        yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
         
     - name: Verify buildozer configuration
       run: |
         buildozer android clean || true
         buildozer --version
+        buildozer android update || true
         
     - name: Build APK (Debug)
       run: |
@@ -100,53 +110,134 @@ jobs:
     - name: Sign APK (Release)
       if: startsWith(github.ref, 'refs/tags/')
       run: |
-        # Use dummy keystore for demo - replace with your actual signing key
-        keytool -genkey -v -keystore release.keystore -alias callsync -keyalg RSA -keysize 2048 -validity 10000 \
-          -dname "CN=CallSync, OU=Dev, O=YourOrg, L=City, S=State, C=US" \
-          -storepass android -keypass android
-        jarsigner -verbose -sigalg SHA1withRSA -digestalg SHA1 \
-          -keystore release.keystore -storepass android \
-          bin/callsync-*-release-unsigned.apk callsync
-        $ANDROID_HOME/build-tools/33.0.0/zipalign -v 4 \
-          bin/callsync-*-release-unsigned.apk \
-          bin/callsync-release-signed.apk
+        # Create release keystore (for demo - use your own signing key in production)
+        if [ ! -f release.keystore ]; then
+          keytool -genkey -v -keystore release.keystore -alias callsync -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=CallSync, OU=Dev, O=KortahunUnited, L=Freetown, S=Western, C=SL" \
+            -storepass android -keypass android
+        fi
+        
+        # Find the unsigned APK
+        UNSIGNED_APK=$(find bin -name "*-release-unsigned.apk" | head -1)
+        if [ -n "$UNSIGNED_APK" ]; then
+          echo "Signing APK: $UNSIGNED_APK"
           
+          # Sign the APK
+          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
+            -keystore release.keystore -storepass android -keypass android \
+            "$UNSIGNED_APK" callsync
+          
+          # Align the APK
+          $ANDROID_HOME/build-tools/34.0.0/zipalign -v 4 \
+            "$UNSIGNED_APK" \
+            "bin/callsync-release-signed.apk"
+            
+          echo "✅ APK signed and aligned successfully"
+        else
+          echo "❌ No unsigned APK found to sign"
+          ls -la bin/
+        fi
+        
+    - name: List build artifacts
+      run: |
+        echo "Build artifacts:"
+        find bin -name "*.apk" -exec ls -lh {} \;
+        
     - name: Upload Debug APK
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: callsync-debug-apk
-        path: bin/*.apk
+        path: bin/*-debug.apk
         retention-days: 30
+        compression-level: 6
         
     - name: Upload Release APK
       if: startsWith(github.ref, 'refs/tags/')
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: callsync-release-apk
         path: bin/callsync-release-signed.apk
         retention-days: 90
+        compression-level: 6
         
     - name: Create Release
       if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         files: |
           bin/callsync-release-signed.apk
           bin/*-debug.apk
         generate_release_notes: true
         prerelease: false
+        tag_name: ${{ github.ref_name }}
+        name: "Call Log Sync Pro ${{ github.ref_name }}"
+        body: |
+          ## 📱 Call Log Sync Pro ${{ github.ref_name }}
+          
+          ### 🚀 Features
+          - Secure Android call log synchronization
+          - Modern Kivy-based UI with Material Design
+          - Multi-backend support with automatic failover
+          - Comprehensive error handling and retry logic
+          - Real-time sync status and progress tracking
+          
+          ### 📦 Downloads
+          - **Release APK**: `callsync-release-signed.apk` (Recommended for production)
+          - **Debug APK**: `*-debug.apk` (For testing and development)
+          
+          ### 🔧 Installation
+          1. Download the release APK
+          2. Enable "Unknown Sources" in Android settings
+          3. Install the APK
+          4. Grant required permissions
+          5. Start syncing!
+          
+          ### 🛡️ Permissions Required
+          - 📞 Read Call Log
+          - 📱 Read Phone State  
+          - 👥 Read Contacts
+          - 🌐 Internet Access
+          - 💾 Storage Access
+          
+          Built with ❤️ using Python + Kivy
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
     - name: Build summary
       run: |
-        echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
-        echo "- **Build Status**: ✅ Success" >> $GITHUB_STEP_SUMMARY
-        echo "- **APK Location**: \`bin/\`" >> $GITHUB_STEP_SUMMARY
-        echo "- **Build Time**: $(date)" >> $GITHUB_STEP_SUMMARY
-        if [ -f "bin/callsync-*-debug.apk" ]; then
-          echo "- **Debug APK**: $(ls bin/callsync-*-debug.apk)" >> $GITHUB_STEP_SUMMARY
+        echo "## 📱 Call Log Sync Pro - Build Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### ✅ Build Status: SUCCESS" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+        echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| **Build Time** | $(date) |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Python Version** | 3.9 |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Java Version** | 17 |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Android API** | 34 |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Target Arch** | arm64-v8a, armeabi-v7a |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -f bin/*-debug.apk ]; then
+          DEBUG_APK=$(ls bin/*-debug.apk 2>/dev/null | head -1)
+          if [ -n "$DEBUG_APK" ]; then
+            DEBUG_SIZE=$(ls -lh "$DEBUG_APK" | awk '{print $5}')
+            echo "| **Debug APK** | $DEBUG_APK ($DEBUG_SIZE) |" >> $GITHUB_STEP_SUMMARY
+          fi
         fi
+        
         if [ -f "bin/callsync-release-signed.apk" ]; then
-          echo "- **Release APK**: callsync-release-signed.apk" >> $GITHUB_STEP_SUMMARY
+          RELEASE_SIZE=$(ls -lh bin/callsync-release-signed.apk | awk '{print $5}')
+          echo "| **Release APK** | callsync-release-signed.apk ($RELEASE_SIZE) |" >> $GITHUB_STEP_SUMMARY
         fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📦 Artifacts" >> $GITHUB_STEP_SUMMARY
+        echo "- Debug APK available for download" >> $GITHUB_STEP_SUMMARY
+        if [ -f "bin/callsync-release-signed.apk" ]; then
+          echo "- Release APK available for download" >> $GITHUB_STEP_SUMMARY
+          echo "- GitHub Release created with APK attachments" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "🎉 **Ready for deployment!**" >> $GITHUB_STEP_SUMMARY

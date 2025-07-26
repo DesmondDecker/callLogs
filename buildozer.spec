@@ -29,7 +29,7 @@ version = 2.0.0
 
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
-requirements = python3,kivy==2.1.0,android,pyjnius,plyer,requests,urllib3,certifi,charset-normalizer,idna
+requirements = python3,kivy==2.1.0,android,pyjnius,plyer,requests,urllib3,certifi,charset-normalizer,idna,python-dateutil,simplejson,colorama
 
 # (str) Custom source folders for requirements
 # Sets custom source for any requirements with recipes
@@ -86,16 +86,18 @@ android.presplash_color = #FFFFFF
 
 # (list) Permissions
 # (See https://python-for-android.readthedocs.io/en/latest/buildoptions/#build-options-1 for all the supported syntaxes and properties)
-android.permissions = android.permission.INTERNET,
-    android.permission.ACCESS_NETWORK_STATE,
-    android.permission.READ_CALL_LOG,
-    android.permission.READ_PHONE_STATE,
-    android.permission.READ_CONTACTS,
-    android.permission.WAKE_LOCK,
-    android.permission.FOREGROUND_SERVICE
+android.permissions = INTERNET,
+    ACCESS_NETWORK_STATE,
+    READ_CALL_LOG,
+    READ_PHONE_STATE,
+    READ_CONTACTS,
+    WAKE_LOCK,
+    FOREGROUND_SERVICE,
+    ACCESS_WIFI_STATE,
+    CHANGE_WIFI_STATE
 
 # (list) Android application meta-data to set (key=value format)
-android.meta_data = com.google.android.gms.version=@integer/google_play_services_version
+# android.meta_data = com.google.android.gms.version=@integer/google_play_services_version
 
 # (list) Android library project to add (will be added in the
 # project.properties automatically.)
@@ -107,13 +109,14 @@ android.logcat_filters = *:S python:D
 # (bool) Copy library instead of making a libpymodules.so
 android.copy_libs = 1
 
-# (list) The Android archs to build for, choices: armeabi-v7a, arm64-v8a, x86, x86_64
-# In past, was `android.arch` as we weren't supporting builds for multiple archs at the same time.
+# (str) The Android arch to build for, choices: armeabi-v7a, arm64-v8a, x86, x86_64
+# You can build for multiple archs at the same time, just separate the archs with comma
+# ex: android.archs = arm64-v8a, armeabi-v7a
 android.archs = arm64-v8a, armeabi-v7a
 
 # (int) overrides automatic versionCode computation (used in build.gradle)
 # this is not the same as app version and should only be edited if you know what you're doing
-# android.numeric_version = 1
+android.numeric_version = 1
 
 # (bool) enables Android auto backup feature (Android API >=23)
 android.allow_backup = True
@@ -136,6 +139,46 @@ android.release_artifact = apk
 # (str) The format used to package the app for debug mode (apk or aar).
 android.debug_artifact = apk
 
+# (int) Android API to use (auto = automatically sets from target API)
+android.api = 34
+
+# (int) Minimum API your APK / AAB will support.
+android.minapi = 21
+
+# (str) Android NDK version to use
+android.ndk = 25b
+
+# (int) Android NDK API to use. This is the minimum API your app will support, it should usually match android.minapi.
+android.ndk_api = 21
+
+# (bool) Use --private data storage (True) or --dir public storage (False)
+android.private_storage = True
+
+# (str) Android NDK directory (if empty, it will be automatically downloaded.)
+# android.ndk_path =
+
+# (str) Android SDK directory (if empty, it will be automatically downloaded.)
+# android.sdk_path =
+
+# (str) ANT directory (if empty, it will be automatically downloaded.)
+# android.ant_path =
+
+# (bool) If True, then skip trying to update the Android sdk
+# This can be useful to avoid excess Internet downloads or save time
+# when an update is due and you just want to test/build your package
+# android.skip_update = False
+
+# (bool) If True, then automatically accept SDK license
+# agreements. This is intended for automation only. If set to False,
+# the default, you will be shown the license when first running
+# buildozer.
+android.accept_sdk_license = True
+
+# (str) The Android arch to build for, choices: armeabi-v7a, arm64-v8a, x86, x86_64
+# Note that x86 and x86_64 are not recommended for release builds since they are
+# primarily used for emulators. Building for both armeabi-v7a and arm64-v8a will create a fat APK.
+android.archs = arm64-v8a, armeabi-v7a
+
 #
 # Python for android (p4a) specific
 #
@@ -144,7 +187,7 @@ android.debug_artifact = apk
 # p4a.url = https://github.com/kivy/python-for-android.git
 
 # (str) python-for-android fork to use in case if p4a.url is not specified, defaults to upstream (kivy)
-# p4a.fork = kivy
+p4a.fork = kivy
 
 # (str) python-for-android branch to use, defaults to master
 p4a.branch = master
@@ -268,10 +311,10 @@ warn_on_root = 1
 
 # Profile for release builds
 [app@release]
-# Add any release-specific configurations here
+title = Call Log Sync Pro
 android.release_artifact = apk
 
-# Profile for debug builds
+# Profile for debug builds  
 [app@debug]
-# Add any debug-specific configurations here
+title = Call Log Sync Pro (Debug)
 android.debug_artifact = apk
