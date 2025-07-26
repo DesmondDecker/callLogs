@@ -11,7 +11,7 @@ on:
 
 jobs:
   build-android:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     
     steps:
     - name: Checkout code
@@ -20,7 +20,7 @@ jobs:
     - name: Setup Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.9'
+        python-version: '3.11'
         
     - name: Setup Java
       uses: actions/setup-java@v4
@@ -33,30 +33,31 @@ jobs:
       with:
         api-level: 34
         build-tools: 34.0.0
-        ndk-version: '25.2.9519653'
+        ndk-version: '26.1.10909125'
         
     - name: Cache buildozer global directory
       uses: actions/cache@v4
       with:
         path: ~/.buildozer
-        key: buildozer-global-${{ hashFiles('buildozer.spec') }}
+        key: buildozer-global-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
         restore-keys: |
-          buildozer-global-
+          buildozer-global-${{ runner.os }}-
           
     - name: Cache buildozer directory
       uses: actions/cache@v4
       with:
         path: .buildozer
-        key: buildozer-${{ hashFiles('buildozer.spec') }}-${{ hashFiles('requirements.txt') }}
+        key: buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}-${{ hashFiles('requirements.txt') }}
         restore-keys: |
-          buildozer-${{ hashFiles('buildozer.spec') }}-
-          buildozer-
+          buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}-
+          buildozer-${{ runner.os }}-
           
     - name: Install system dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y \
           python3-pip \
+          python3-venv \
           build-essential \
           git \
           unzip \
@@ -73,12 +74,25 @@ jobs:
           libssl-dev \
           ccache \
           lld \
-          llvm
+          llvm \
+          libltdl-dev \
+          libffi-dev \
+          libssl-dev \
+          python3-distutils \
+          python3-setuptools
           
+    - name: Create virtual environment
+      run: |
+        python3 -m venv venv
+        source venv/bin/activate
+        echo "VIRTUAL_ENV=$VIRTUAL_ENV" >> $GITHUB_ENV
+        echo "$VIRTUAL_ENV/bin" >> $GITHUB_PATH
+        
     - name: Install Python dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install --upgrade buildozer cython
+        source venv/bin/activate
+        python -m pip install --upgrade pip setuptools wheel
+        pip install --upgrade buildozer==1.5.0 cython==3.0.8
         pip install -r requirements.txt
         
     - name: Setup Android environment variables
@@ -86,25 +100,34 @@ jobs:
         echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
         echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
         echo "JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64" >> $GITHUB_ENV
-        echo "NDK_VERSION=25.2.9519653" >> $GITHUB_ENV
+        echo "NDK_VERSION=26.1.10909125" >> $GITHUB_ENV
+        echo "PYTHONPATH=$GITHUB_WORKSPACE:$PYTHONPATH" >> $GITHUB_ENV
         
     - name: Accept Android licenses
       run: |
         yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
         
-    - name: Verify buildozer configuration
+    - name: Verify buildozer installation
       run: |
-        buildozer android clean || true
+        source venv/bin/activate
         buildozer --version
-        buildozer android update || true
+        python --version
+        which python
+        
+    - name: Initialize buildozer
+      run: |
+        source venv/bin/activate
+        buildozer android clean || true
         
     - name: Build APK (Debug)
       run: |
+        source venv/bin/activate
         buildozer android debug
         
     - name: Build APK (Release) for tags
       if: startsWith(github.ref, 'refs/tags/')
       run: |
+        source venv/bin/activate
         buildozer android release
         
     - name: Sign APK (Release)
@@ -141,24 +164,27 @@ jobs:
     - name: List build artifacts
       run: |
         echo "Build artifacts:"
-        find bin -name "*.apk" -exec ls -lh {} \;
+        find bin -name "*.apk" -exec ls -lh {} \; 2>/dev/null || echo "No APK files found"
         
     - name: Upload Debug APK
       uses: actions/upload-artifact@v4
+      if: always()
       with:
-        name: callsync-debug-apk
-        path: bin/*-debug.apk
+        name: callsync-debug-apk-${{ github.run_number }}
+        path: bin/*-debug*.apk
         retention-days: 30
         compression-level: 6
+        if-no-files-found: warn
         
     - name: Upload Release APK
       if: startsWith(github.ref, 'refs/tags/')
       uses: actions/upload-artifact@v4
       with:
-        name: callsync-release-apk
+        name: callsync-release-apk-${{ github.ref_name }}
         path: bin/callsync-release-signed.apk
         retention-days: 90
         compression-level: 6
+        if-no-files-found: error
         
     - name: Create Release
       if: startsWith(github.ref, 'refs/tags/')
@@ -166,7 +192,7 @@ jobs:
       with:
         files: |
           bin/callsync-release-signed.apk
-          bin/*-debug.apk
+          bin/*-debug*.apk
         generate_release_notes: true
         prerelease: false
         tag_name: ${{ github.ref_name }}
@@ -203,23 +229,42 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
+    - name: Upload build logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs-${{ github.run_number }}
+        path: |
+          .buildozer/android/platform/build-*/**/*.log
+          .buildozer/android/logs/*.log
+        retention-days: 7
+        if-no-files-found: ignore
+        
     - name: Build summary
+      if: always()
       run: |
         echo "## 📱 Call Log Sync Pro - Build Summary" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### ✅ Build Status: SUCCESS" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -f bin/*-debug*.apk ]; then
+          echo "### ✅ Build Status: SUCCESS" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "### ❌ Build Status: FAILED" >> $GITHUB_STEP_SUMMARY
+        fi
+        
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
         echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
         echo "| **Build Time** | $(date) |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Python Version** | 3.9 |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Python Version** | 3.11 |" >> $GITHUB_STEP_SUMMARY
         echo "| **Java Version** | 17 |" >> $GITHUB_STEP_SUMMARY
         echo "| **Android API** | 34 |" >> $GITHUB_STEP_SUMMARY
+        echo "| **NDK Version** | 26.1.10909125 |" >> $GITHUB_STEP_SUMMARY
         echo "| **Target Arch** | arm64-v8a, armeabi-v7a |" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         
-        if [ -f bin/*-debug.apk ]; then
-          DEBUG_APK=$(ls bin/*-debug.apk 2>/dev/null | head -1)
+        if [ -f bin/*-debug*.apk ]; then
+          DEBUG_APK=$(ls bin/*-debug*.apk 2>/dev/null | head -1)
           if [ -n "$DEBUG_APK" ]; then
             DEBUG_SIZE=$(ls -lh "$DEBUG_APK" | awk '{print $5}')
             echo "| **Debug APK** | $DEBUG_APK ($DEBUG_SIZE) |" >> $GITHUB_STEP_SUMMARY
@@ -233,11 +278,20 @@ jobs:
         
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 📦 Artifacts" >> $GITHUB_STEP_SUMMARY
-        echo "- Debug APK available for download" >> $GITHUB_STEP_SUMMARY
+        if [ -f bin/*-debug*.apk ]; then
+          echo "- ✅ Debug APK available for download" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "- ❌ Debug APK build failed" >> $GITHUB_STEP_SUMMARY
+        fi
+        
         if [ -f "bin/callsync-release-signed.apk" ]; then
-          echo "- Release APK available for download" >> $GITHUB_STEP_SUMMARY
-          echo "- GitHub Release created with APK attachments" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Release APK available for download" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ GitHub Release created with APK attachments" >> $GITHUB_STEP_SUMMARY
         fi
         
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "🎉 **Ready for deployment!**" >> $GITHUB_STEP_SUMMARY
+        if [ -f bin/*-debug*.apk ] || [ -f "bin/callsync-release-signed.apk" ]; then
+          echo "🎉 **Build completed successfully!**" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "💥 **Build failed - check logs for details**" >> $GITHUB_STEP_SUMMARY
+        fi

@@ -1,32 +1,33 @@
-# Core Kivy framework
-kivy==2.1.0
+# Core Kivy framework - latest stable
+kivy==2.2.0
 
-# Android-specific dependencies
-pyjnius==1.4.2
+# Android-specific dependencies - updated versions
+pyjnius==1.6.1
 android
 
-# Platform utilities
+# Platform utilities - latest
 plyer==2.1.0
 
-# HTTP requests
+# HTTP requests - latest stable versions
 requests==2.31.0
-urllib3==2.0.4
-certifi==2023.7.22
-charset-normalizer==3.2.0
-idna==3.4
+urllib3==2.0.7
+certifi==2023.11.17
+charset-normalizer==3.3.2
+idna==3.6
 
 # Development and build tools (not included in APK)
 buildozer==1.5.0
-cython==0.29.36
+cython==3.0.8
 
-# Additional Android permissions support
-python-for-android==2023.06.21
+# Android support - latest
+python-for-android==2024.01.21
 
-# Optional: For better JSON handling
-simplejson==3.19.1
-
-# Optional: For logging enhancements
+# Additional utilities - updated versions
+simplejson==3.19.2
 colorama==0.4.6
-
-# Optional: For date/time utilities
 python-dateutil==2.8.2
+
+# For better Android compatibility
+six==1.16.0
+setuptools==69.0.3
+wheel==0.42.0
