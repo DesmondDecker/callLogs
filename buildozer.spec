@@ -27,8 +27,8 @@ source.exclude_patterns = license,images/*/*.jpg,*.pyc,*.pyo
 # (str) Application versioning (method 1)
 version = 2.0.0
 
-# (list) Application requirements - updated for better compatibility
-requirements = python3,kivy==2.2.0,android,pyjnius==1.6.1,plyer==2.1.0,requests==2.31.0,urllib3==2.0.7,certifi==2023.11.17,charset-normalizer==3.3.2,idna==3.6,python-dateutil==2.8.2,simplejson==3.19.2,colorama==0.4.6,six==1.16.0
+# (list) Application requirements - simplified for better compatibility
+requirements = python3,kivy,android,pyjnius,plyer,requests,urllib3,certifi,charset-normalizer,idna,python-dateutil,simplejson,colorama,six
 
 # (str) Custom source folders for requirements
 # Sets custom source for any requirements with recipes
@@ -123,17 +123,17 @@ android.release_artifact = apk
 # (str) The format used to package the app for debug mode (apk or aar).
 android.debug_artifact = apk
 
-# (int) Android API to use - latest stable
-android.api = 34
+# (int) Android API to use - using more stable API level
+android.api = 33
 
-# (int) Minimum API your APK will support - updated for better compatibility
-android.minapi = 23
+# (int) Minimum API your APK will support - keeping compatibility
+android.minapi = 21
 
-# (str) Android NDK version to use - latest stable
-android.ndk = 26b
+# (str) Android NDK version to use - using more stable version
+android.ndk = 25b
 
 # (int) Android NDK API to use
-android.ndk_api = 23
+android.ndk_api = 21
 
 # (bool) Use --private data storage (True) or --dir public storage (False)
 android.private_storage = True

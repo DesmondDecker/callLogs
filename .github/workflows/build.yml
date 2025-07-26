@@ -31,9 +31,9 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
       with:
-        api-level: 34
-        build-tools: 34.0.0
-        ndk-version: '26.1.10909125'
+        api-level: 33
+        build-tools: 33.0.2
+        ndk-version: '25.2.9519653'
         
     - name: Cache buildozer global directory
       uses: actions/cache@v4
@@ -58,6 +58,7 @@ jobs:
         sudo apt-get install -y \
           python3-pip \
           python3-venv \
+          python3-dev \
           build-essential \
           git \
           unzip \
@@ -76,10 +77,13 @@ jobs:
           lld \
           llvm \
           libltdl-dev \
-          libffi-dev \
-          libssl-dev \
           python3-distutils \
-          python3-setuptools
+          python3-setuptools \
+          python3-wheel \
+          cython3 \
+          zip \
+          default-jdk \
+          gradle
           
     - name: Create virtual environment
       run: |
@@ -107,7 +111,7 @@ jobs:
         echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
         echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
         echo "JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64" >> $GITHUB_ENV
-        echo "NDK_VERSION=26.1.10909125" >> $GITHUB_ENV
+        echo "NDK_VERSION=25.2.9519653" >> $GITHUB_ENV
         echo "PYTHONPATH=$GITHUB_WORKSPACE:$PYTHONPATH" >> $GITHUB_ENV
         
     - name: Accept Android licenses
@@ -117,19 +121,72 @@ jobs:
     - name: Verify buildozer installation
       run: |
         source venv/bin/activate
+        echo "=== Buildozer Version ==="
         buildozer --version
+        
+        echo "=== Python Environment ==="
         python --version
         which python
+        
+        echo "=== Java Environment ==="
+        java -version
+        echo "JAVA_HOME: $JAVA_HOME"
+        
+        echo "=== Android Environment ==="
+        echo "ANDROID_HOME: $ANDROID_HOME"
+        echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+        ls -la $ANDROID_HOME/ || echo "Android SDK directory not found"
+        
+        echo "=== Buildozer Spec Validation ==="
+        if [ -f buildozer.spec ]; then
+          echo "✅ buildozer.spec found"
+          # Check for common issues in spec
+          grep -n "requirements.*=" buildozer.spec || echo "No requirements line found"
+          grep -n "android.api.*=" buildozer.spec || echo "No android.api line found"
+        else
+          echo "❌ buildozer.spec not found!"
+          ls -la
+          exit 1
+        fi
         
     - name: Initialize buildozer
       run: |
         source venv/bin/activate
+        # Clean any previous builds
         buildozer android clean || true
         
-    - name: Build APK (Debug)
+        # Verify buildozer can read the spec file
+        buildozer android update || echo "Update failed, continuing..."
+        
+    - name: Build APK (Debug) with detailed logging
       run: |
         source venv/bin/activate
-        buildozer android debug
+        
+        # Set buildozer to verbose mode and capture all output
+        export BUILDOZER_LOG_LEVEL=2
+        export PYTHONUNBUFFERED=1
+        
+        # Run buildozer with detailed logging
+        echo "Starting buildozer android debug..."
+        buildozer android debug --verbose 2>&1 | tee buildozer.log
+        
+        # Check if APK was created
+        if [ ! -f bin/*.apk ]; then
+          echo "❌ APK build failed!"
+          echo "=== BUILDOZER LOG TAIL ==="
+          tail -100 buildozer.log || echo "No buildozer.log found"
+          
+          echo "=== CHECKING BUILD DIRECTORY ==="
+          find .buildozer -name "*.log" -exec echo "Found log: {}" \; -exec tail -20 {} \; 2>/dev/null || echo "No build logs found"
+          
+          echo "=== PYTHON FOR ANDROID LOGS ==="
+          find .buildozer -path "*python-for-android*" -name "*.log" -exec echo "Found p4a log: {}" \; -exec tail -20 {} \; 2>/dev/null || echo "No p4a logs found"
+          
+          exit 1
+        else
+          echo "✅ APK build successful!"
+          ls -la bin/
+        fi
         
     - name: Build APK (Release) for tags
       if: startsWith(github.ref, 'refs/tags/')
@@ -158,7 +215,7 @@ jobs:
             "$UNSIGNED_APK" callsync
           
           # Align the APK
-          $ANDROID_HOME/build-tools/34.0.0/zipalign -v 4 \
+          $ANDROID_HOME/build-tools/33.0.2/zipalign -v 4 \
             "$UNSIGNED_APK" \
             "bin/callsync-release-signed.apk"
             
@@ -265,8 +322,8 @@ jobs:
         echo "| **Build Time** | $(date) |" >> $GITHUB_STEP_SUMMARY
         echo "| **Python Version** | 3.11 |" >> $GITHUB_STEP_SUMMARY
         echo "| **Java Version** | 17 |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Android API** | 34 |" >> $GITHUB_STEP_SUMMARY
-        echo "| **NDK Version** | 26.1.10909125 |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Android API** | 33 |" >> $GITHUB_STEP_SUMMARY
+        echo "| **NDK Version** | 25.2.9519653 |" >> $GITHUB_STEP_SUMMARY
         echo "| **Target Arch** | arm64-v8a, armeabi-v7a |" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         
