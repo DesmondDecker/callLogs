@@ -1,33 +1,34 @@
-# Core Kivy framework - latest stable
+# Development requirements (can be installed via pip)
+# Use this file for local development and testing
+
+# Core Kivy framework
 kivy==2.2.0
 
-# Android-specific dependencies - updated versions
-pyjnius==1.6.1
-android
-
-# Platform utilities - latest
+# Platform utilities
 plyer==2.1.0
 
-# HTTP requests - latest stable versions
+# HTTP requests
 requests==2.31.0
 urllib3==2.0.7
 certifi==2023.11.17
 charset-normalizer==3.3.2
 idna==3.6
 
-# Development and build tools (not included in APK)
+# Build tools
 buildozer==1.5.0
 cython==3.0.8
 
-# Android support - latest
-python-for-android==2024.01.21
-
-# Additional utilities - updated versions
+# Utilities
 simplejson==3.19.2
 colorama==0.4.6
 python-dateutil==2.8.2
-
-# For better Android compatibility
 six==1.16.0
-setuptools==69.0.3
-wheel==0.42.0
+
+# Development tools
+pytest==7.4.4
+pytest-cov==4.1.0
+black==23.12.1
+flake8==7.0.0
+
+# Note: Android-specific packages (pyjnius, android) are only available 
+# during the buildozer build process and cannot be installed via pip

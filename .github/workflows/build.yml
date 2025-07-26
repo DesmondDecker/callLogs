@@ -93,7 +93,14 @@ jobs:
         source venv/bin/activate
         python -m pip install --upgrade pip setuptools wheel
         pip install --upgrade buildozer==1.5.0 cython==3.0.8
-        pip install -r requirements.txt
+        
+        # Install development dependencies (excluding Android-specific packages)
+        if [ -f requirements-dev.txt ]; then
+          pip install -r requirements-dev.txt
+        else
+          # Fallback to manual installation if requirements-dev.txt doesn't exist
+          pip install kivy==2.2.0 plyer==2.1.0 requests==2.31.0 urllib3==2.0.7 certifi==2023.11.17 charset-normalizer==3.3.2 idna==3.6 python-dateutil==2.8.2 simplejson==3.19.2 colorama==0.4.6 six==1.16.0
+        fi
         
     - name: Setup Android environment variables
       run: |
