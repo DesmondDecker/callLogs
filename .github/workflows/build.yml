@@ -122,7 +122,19 @@ jobs:
           libtool-bin \
           autoconf-archive \
           pkg-config \
-          gettext
+          gettext \
+          m4
+        
+        # Verify autotools installation
+        echo "Verifying autotools installation:"
+        autoconf --version
+        automake --version
+        libtool --version
+        which libtoolize
+        
+        # Check if libtool macros are available
+        echo "Checking for libtool macros:"
+        find /usr/share/aclocal -name "*libtool*" -type f | head -5
           
     - name: Install Python dependencies
       run: |
@@ -159,17 +171,29 @@ jobs:
         export ANDROID_HOME=$ANDROID_SDK_ROOT
         export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH
         
+        # Set autotools environment variables
+        export ACLOCAL_PATH="/usr/share/aclocal:$ACLOCAL_PATH"
+        export PKG_CONFIG_PATH="/usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH"
+        
         # Debug output
         echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
         echo "ANDROID_HOME=$ANDROID_HOME"
         echo "PATH=$PATH"
+        echo "ACLOCAL_PATH=$ACLOCAL_PATH"
         
         # Verify tools are available
         which sdkmanager || echo "❌ sdkmanager not in PATH"
+        which autoconf || echo "❌ autoconf not found"
+        which libtool || echo "❌ libtool not found"
+        which libtoolize || echo "❌ libtoolize not found"
         ls -la "$ANDROID_SDK_ROOT/build-tools/34.0.0/aidl" || echo "❌ aidl not found"
         
-        # Run buildozer
-        buildozer android debug
+        # Pre-run autotools setup to prevent macro issues
+        echo "Setting up autotools environment..."
+        aclocal --print-ac-dir
+        
+        # Run buildozer with verbose output for debugging
+        buildozer -v android debug
         
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
