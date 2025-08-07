@@ -30,6 +30,7 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
+        # First install base dependencies and fix any broken packages
         sudo apt-get install -y \
           build-essential \
           git \
@@ -58,6 +59,15 @@ jobs:
           libxml2-dev \
           libxmlsec1-dev \
           liblzma-dev \
+          ccache \
+          zip \
+          openjdk-11-jdk
+        
+        # Fix any broken installations
+        sudo apt-get install -f -y
+        
+        # Install media dependencies with proper order
+        sudo apt-get install -y \
           ffmpeg \
           libsdl2-dev \
           libsdl2-image-dev \
@@ -66,12 +76,13 @@ jobs:
           libportmidi-dev \
           libswscale-dev \
           libavformat-dev \
-          libavcodec-dev \
+          libavcodec-dev
+        
+        # Install GStreamer dependencies in correct order
+        sudo apt-get install -y \
+          libunwind-dev \
           libgstreamer1.0-dev \
-          libgstreamer-plugins-base1.0-dev \
-          ccache \
-          zip \
-          openjdk-11-jdk
+          libgstreamer-plugins-base1.0-dev
         
     - name: Setup Android SDK
       run: |
@@ -129,9 +140,9 @@ jobs:
         path: |
           ~/.buildozer
           .buildozer
-        key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}-v3
+        key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}-v4
         restore-keys: |
-          ${{ runner.os }}-buildozer-v3-
+          ${{ runner.os }}-buildozer-v4-
           
     - name: Install Python dependencies
       run: |
@@ -139,10 +150,10 @@ jobs:
         pip install --upgrade setuptools wheel
         pip install -r requirements.txt
         
-    - name: Verify buildozer.spec exists
+    - name: Create buildozer.spec
       run: |
         if [ ! -f buildozer.spec ]; then
-          echo "Creating buildozer.spec from paste.txt content..."
+          echo "Creating buildozer.spec..."
           cat > buildozer.spec << 'EOF'
         [app]
         title = Kortahun United
@@ -150,7 +161,7 @@ jobs:
         package.domain = com.kortahununited
         source.dir = .
         source.include_exts = py,png,jpg,kv,atlas,json
-        source.exclude_dirs = tests, bin, .git, .github, __pycache__, .pytest_cache
+        source.exclude_dirs = tests, bin, .git, .github, __pycache__, .pytest_cache, .buildozer, .vscode, .idea, node_modules
         version = 1.0.5
         requirements = python3,kivy==2.1.0,kivymd==1.1.1,requests==2.31.0,urllib3==2.0.7,pyjnius,android
         orientation = portrait
@@ -165,6 +176,9 @@ jobs:
         android.ndk_api = 21
         android.accept_sdk_license = True
         android.private_storage = True
+        android.numeric_version = 105
+        p4a.bootstrap = sdl2
+        p4a.setup_py = false
         
         [buildozer]
         log_level = 2
@@ -172,7 +186,7 @@ jobs:
         EOF
         fi
         
-        echo "✅ buildozer.spec content:"
+        echo "✅ buildozer.spec created/verified:"
         head -20 buildozer.spec
         
     - name: Setup build environment
@@ -232,8 +246,8 @@ jobs:
         # Build with increased verbosity and error handling
         set -e
         buildozer -v android debug 2>&1 | tee build.log || {
-          echo "❌ Build failed! Last 50 lines of build log:"
-          tail -50 build.log
+          echo "❌ Build failed! Last 100 lines of build log:"
+          tail -100 build.log
           echo "📋 Full build log saved as artifact"
           exit 1
         }
@@ -320,5 +334,3 @@ jobs:
         else
           echo "**❌ Build Status:** FAILED" >> $GITHUB_STEP_SUMMARY
         fi
-
-        
