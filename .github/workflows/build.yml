@@ -10,7 +10,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04  # Use specific Ubuntu version for consistency
     
     steps:
     - name: Checkout code
@@ -21,18 +21,71 @@ jobs:
       with:
         python-version: 3.9
         
-    - name: Set up Java 17
+    - name: Set up Java 11
       uses: actions/setup-java@v3
       with:
         distribution: 'temurin'
-        java-version: '17'
+        java-version: '11'  # Changed from 17 to 11 for better compatibility
+        
+    - name: Install comprehensive build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          git \
+          unzip \
+          wget \
+          curl \
+          autoconf \
+          automake \
+          libtool \
+          libtool-bin \
+          autotools-dev \
+          autoconf-archive \
+          pkg-config \
+          gettext \
+          m4 \
+          zlib1g-dev \
+          libssl-dev \
+          libffi-dev \
+          libsqlite3-dev \
+          libbz2-dev \
+          libreadline-dev \
+          libncurses5-dev \
+          libncursesw5-dev \
+          xz-utils \
+          tk-dev \
+          libxml2-dev \
+          libxmlsec1-dev \
+          libffi-dev \
+          liblzma-dev \
+          ffmpeg \
+          libsdl2-dev \
+          libsdl2-image-dev \
+          libsdl2-mixer-dev \
+          libsdl2-ttf-dev \
+          libportmidi-dev \
+          libswscale-dev \
+          libavformat-dev \
+          libavcodec-dev \
+          libgstreamer1.0-dev \
+          libgstreamer-plugins-base1.0-dev \
+          ccache
+        
+        # Verify critical tools are installed
+        echo "Verifying autotools installation:"
+        autoconf --version
+        automake --version
+        libtool --version
+        which libtoolize
+        aclocal --version
         
     - name: Setup Android SDK
-      uses: android-actions/setup-android@v2
+      uses: android-actions/setup-android@v3
       
     - name: Download and setup Android command-line tools
       run: |
-        ANDROID_SDK_ROOT=$HOME/.buildozer/android/platform/android-sdk
+        ANDROID_SDK_ROOT=$HOME/android-sdk
         echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
         
         # Create SDK directory structure
@@ -52,18 +105,19 @@ jobs:
         # Verify sdkmanager is available
         ls -la "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
         
-    - name: Accept Android SDK licenses
-      run: |
-        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
-      
-    - name: Install Android build-tools
+    - name: Accept Android SDK licenses and install components
       run: |
         SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
         
+        # Accept licenses first
+        yes | $SDKMANAGER --licenses || true
+        
         # Install required Android components
-        $SDKMANAGER "build-tools;34.0.0"
+        $SDKMANAGER "build-tools;33.0.2"
         $SDKMANAGER "platforms;android-33"
         $SDKMANAGER "platform-tools"
+        $SDKMANAGER "cmake;3.22.1"
+        $SDKMANAGER "ndk;25.1.8937393"
         
         # Verify installation
         echo "✅ Installed components:"
@@ -71,25 +125,6 @@ jobs:
         ls -la "$ANDROID_SDK_ROOT/platforms/" || echo "❌ platforms not found"
         ls -la "$ANDROID_SDK_ROOT/platform-tools/" || echo "❌ platform-tools not found"
         
-    - name: Ensure build-tools in expected location
-      run: |
-        # Buildozer might also look for legacy tools structure
-        LEGACY_TOOLS_PATH="$ANDROID_SDK_ROOT/tools/bin"
-        mkdir -p "$LEGACY_TOOLS_PATH"
-        
-        # Create symlink to sdkmanager in legacy location if needed
-        if [ ! -f "$LEGACY_TOOLS_PATH/sdkmanager" ]; then
-          ln -sf "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "$LEGACY_TOOLS_PATH/sdkmanager"
-        fi
-        
-        # Verify aidl is available in build-tools
-        AIDL_PATH="$ANDROID_SDK_ROOT/build-tools/34.0.0/aidl"
-        if [ -f "$AIDL_PATH" ]; then
-          echo "✅ AIDL found at $AIDL_PATH"
-        else
-          echo "❌ AIDL not found at $AIDL_PATH"
-        fi
-      
     - name: Cache pip dependencies
       uses: actions/cache@v3
       with:
@@ -98,102 +133,164 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-pip-
           
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          build-essential \
-          git \
-          ffmpeg \
-          libsdl2-dev \
-          libsdl2-image-dev \
-          libsdl2-mixer-dev \
-          libsdl2-ttf-dev \
-          libportmidi-dev \
-          libswscale-dev \
-          libavformat-dev \
-          libavcodec-dev \
-          zlib1g-dev \
-          libgstreamer1.0-dev \
-          libgstreamer-plugins-base1.0-dev \
-          autoconf \
-          automake \
-          libtool \
-          libtool-bin \
-          autoconf-archive \
-          pkg-config \
-          gettext \
-          m4
-        
-        # Verify autotools installation
-        echo "Verifying autotools installation:"
-        autoconf --version
-        automake --version
-        libtool --version
-        which libtoolize
-        
-        # Check if libtool macros are available
-        echo "Checking for libtool macros:"
-        find /usr/share/aclocal -name "*libtool*" -type f | head -5
-          
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
+        pip install --upgrade setuptools wheel
         pip install -r requirements.txt
-        pip install buildozer cython
+        pip install buildozer==1.5.0 cython==0.29.36
         
-    - name: Create buildozer.spec if not exists
+    - name: Create and configure buildozer.spec
       run: |
-        if [ ! -f buildozer.spec ]; then
-          buildozer init
-        fi
+        # Copy the buildozer.spec from paste.txt content
+        cat > buildozer.spec << 'EOF'
+        [app]
+        title = Kortahun United
+        package.name = kortahununited
+        package.domain = com.kortahununited
+        source.dir = .
+        source.include_exts = py,png,jpg,kv,atlas,json
+        source.exclude_dirs = tests, bin, .git, .github, __pycache__, .pytest_cache
+        version = 1.0.5
+        requirements = python3,kivy==2.1.0,kivymd==1.1.1,requests==2.31.0,urllib3==2.0.7,pyjnius,android
+        orientation = portrait
+        fullscreen = 0
+        android.permissions = INTERNET,ACCESS_NETWORK_STATE,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,READ_CALL_LOG,READ_PHONE_STATE,READ_CONTACTS
+        android.logcat_filters = *:S python:D
+        android.archs = arm64-v8a, armeabi-v7a
+        android.allow_backup = True
         
-    - name: Cache Buildozer global directory
+        [buildozer]
+        log_level = 2
+        warn_on_root = 1
+        EOF
+        
+        # Verify the spec file was created
+        echo "✅ Created buildozer.spec:"
+        head -20 buildozer.spec
+        
+    - name: Cache Buildozer directories
       uses: actions/cache@v3
       with:
-        path: ~/.buildozer
-        key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
+        path: |
+          ~/.buildozer
+          .buildozer
+        key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}-v2
         restore-keys: |
-          ${{ runner.os }}-buildozer-
+          ${{ runner.os }}-buildozer-v2-
           
-    - name: Cache Buildozer directory in project
-      uses: actions/cache@v3
-      with:
-        path: .buildozer
-        key: ${{ runner.os }}-buildozer-project-${{ hashFiles('buildozer.spec') }}
-        restore-keys: |
-          ${{ runner.os }}-buildozer-project-
-          
-    - name: Build APK with Buildozer
+    - name: Setup environment for build
       run: |
         # Set all Android environment variables
-        export ANDROID_SDK_ROOT=$HOME/.buildozer/android/platform/android-sdk
+        export ANDROID_SDK_ROOT=$HOME/android-sdk
         export ANDROID_HOME=$ANDROID_SDK_ROOT
-        export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH
+        export ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/25.1.8937393
+        export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/build-tools/33.0.2:$PATH
+        
+        # Set build environment variables
+        export CC=gcc
+        export CXX=g++
+        export AR=ar
+        export STRIP=strip
+        export MAKE=make
         
         # Set autotools environment variables
         export ACLOCAL_PATH="/usr/share/aclocal:$ACLOCAL_PATH"
         export PKG_CONFIG_PATH="/usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH"
+        export LIBTOOLIZE=libtoolize
+        export AUTOMAKE_LIBDIR=/usr/share/automake-1.16
+        
+        # Write environment to GITHUB_ENV for subsequent steps
+        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+        echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+        echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/25.1.8937393" >> $GITHUB_ENV
+        echo "CC=gcc" >> $GITHUB_ENV
+        echo "CXX=g++" >> $GITHUB_ENV
+        echo "AR=ar" >> $GITHUB_ENV
+        echo "STRIP=strip" >> $GITHUB_ENV
+        echo "MAKE=make" >> $GITHUB_ENV
+        echo "ACLOCAL_PATH=/usr/share/aclocal:$ACLOCAL_PATH" >> $GITHUB_ENV
+        echo "PKG_CONFIG_PATH=/usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+        echo "LIBTOOLIZE=libtoolize" >> $GITHUB_ENV
+        echo "AUTOMAKE_LIBDIR=/usr/share/automake-1.16" >> $GITHUB_ENV
         
         # Debug output
+        echo "Environment setup completed:"
+        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+        echo "ANDROID_HOME=$ANDROID_HOME"
+        echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT"
+        
+        # Verify critical tools are available
+        which autoconf || echo "❌ autoconf not found"
+        which automake || echo "❌ automake not found"
+        which libtool || echo "❌ libtool not found"
+        which libtoolize || echo "❌ libtoolize not found"
+        which aclocal || echo "❌ aclocal not found"
+        which sdkmanager || echo "❌ sdkmanager not in PATH"
+        which gcc || echo "❌ gcc not found"
+        which make || echo "❌ make not found"
+        
+        # Check for AIDL and other Android tools
+        ls -la "$ANDROID_SDK_ROOT/build-tools/33.0.2/aidl" || echo "❌ aidl not found"
+        
+        # Verify autotools macros
+        echo "Autotools macro directories:"
+        find /usr/share/aclocal -name "*libtool*" -type f | head -5
+        
+    - name: Pre-build cleanup and preparation
+      run: |
+        # Clean any previous build artifacts
+        rm -rf .buildozer/android/platform/python-for-android/build/
+        rm -rf .buildozer/android/platform/python-for-android/dists/
+        
+        # Run autoupdate to fix potential macro issues
+        find . -name "configure.ac" -o -name "configure.in" | head -5 | while read configure_file; do
+          if [ -f "$configure_file" ]; then
+            echo "Running autoupdate on $configure_file"
+            cd "$(dirname "$configure_file")"
+            autoupdate || echo "autoupdate failed for $configure_file"
+            cd - > /dev/null
+          fi
+        done
+        
+        # Regenerate autotools files if they exist
+        if [ -f configure.ac ] || [ -f configure.in ]; then
+          echo "Regenerating autotools files..."
+          aclocal -I /usr/share/aclocal || echo "aclocal failed"
+          autoheader || echo "autoheader failed" 
+          libtoolize --force --copy || echo "libtoolize failed"
+          autoconf || echo "autoconf failed"
+          automake --add-missing --copy || echo "automake failed"
+        fi
+        
+    - name: Build APK with Buildozer
+      run: |
+        # Verify environment is properly set
+        echo "Final environment check:"
         echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
         echo "ANDROID_HOME=$ANDROID_HOME"
         echo "PATH=$PATH"
-        echo "ACLOCAL_PATH=$ACLOCAL_PATH"
-        
-        # Verify tools are available
-        which sdkmanager || echo "❌ sdkmanager not in PATH"
-        which autoconf || echo "❌ autoconf not found"
-        which libtool || echo "❌ libtool not found"
-        which libtoolize || echo "❌ libtoolize not found"
-        ls -la "$ANDROID_SDK_ROOT/build-tools/34.0.0/aidl" || echo "❌ aidl not found"
-        
-        # Pre-run autotools setup to prevent macro issues
-        echo "Setting up autotools environment..."
-        aclocal --print-ac-dir
         
         # Run buildozer with verbose output for debugging
-        buildozer -v android debug
+        buildozer -v android debug 2>&1 | tee build.log
+        
+        # Check if APK was created
+        if [ -f "bin/*.apk" ]; then
+          echo "✅ APK build successful"
+          ls -la bin/
+        else
+          echo "❌ APK build failed"
+          echo "Last 100 lines of build log:"
+          tail -100 build.log
+          exit 1
+        fi
+        
+    - name: Upload build log on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log-${{ github.sha }}
+        path: build.log
         
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4

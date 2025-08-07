@@ -15,24 +15,17 @@ source.dir = .
 # (list) Source files to include (let empty to include all the files)
 source.include_exts = py,png,jpg,kv,atlas,json
 
-# (list) List of inclusions using pattern matching
-#source.include_patterns = assets/*,images/*.png
-
 # (list) Source files to exclude (let empty to not exclude anything)
-#source.exclude_exts = spec
+source.exclude_exts = spec,pyc,pyo
 
 # (list) List of directory to exclude (let empty to not exclude anything)
-source.exclude_dirs = tests, bin, .git, .github, __pycache__, .pytest_cache
+source.exclude_dirs = tests, bin, .git, .github, __pycache__, .pytest_cache, .buildozer, .vscode, .idea, node_modules
 
 # (str) Application versioning (method 1)
 version = 1.0.5
 
-# (str) Application versioning (method 2)
-# version.regex = __version__ = ['"](.+)['"]
-# version.filename = %(source.dir)s/main.py
-
 # (list) Application requirements
-# comma separated e.g. requirements = sqlite3,kivy
+# Using specific versions for better reproducibility
 requirements = python3,kivy==2.1.0,kivymd==1.1.1,requests==2.31.0,urllib3==2.0.7,pyjnius,android
 
 # (str) Custom source folders for requirements
@@ -62,7 +55,7 @@ orientation = portrait
 osx.python_version = 3
 
 # Kivy version to use
-osx.kivy_version = 1.9.1
+osx.kivy_version = 2.1.0
 
 #
 # Android specific
@@ -72,17 +65,7 @@ osx.kivy_version = 1.9.1
 fullscreen = 0
 
 # (string) Presplash background color (for android toolchain)
-# Supported formats are: #RRGGBB #AARRGGBB or one of the following names:
-# red, blue, green, black, white, gray, cyan, magenta, yellow, lightgray,
-# darkgray, grey, lightgrey, darkgrey, aqua, fuchsia, lime, maroon, navy,
-# olive, purple, silver, teal.
-#android.presplash_color = #FFFFFF
-
-# (string) Presplash animation using Lottie format.
-# see https://lottiefiles.com/ for examples and https://airbnb.design/lottie/
-# for general documentation.
-# Lottie files can be created using various tools, like Adobe After Effects or Synfig.
-#android.presplash_lottie = "path/to/lottie/file.json"
+android.presplash_color = #FFFFFF
 
 # (str) Adaptive icon of the application (used if Android API level is 26+ at runtime)
 #icon.adaptive_foreground.filename = %(source.dir)s/data/icon_fg.png
@@ -111,12 +94,10 @@ android.logcat_filters = *:S python:D
 #android.copy_libs = 1
 
 # (str) The Android arch to build for, choices: armeabi-v7a, arm64-v8a, x86, x86_64
-# In past, was `android.arch` as we weren't supporting builds for multiple archs at the same time.
 android.archs = arm64-v8a, armeabi-v7a
 
 # (int) overrides automatic versionCode computation (used in build.gradle)
-# this is not the same as app version and should only be edited if you know what you're doing
-# android.numeric_version = 1
+android.numeric_version = 105
 
 # (bool) enables Android auto backup feature (Android API >=23)
 android.allow_backup = True
@@ -126,18 +107,54 @@ android.allow_backup = True
 
 # (str) If you need to insert variables into your AndroidManifest.xml file,
 # you can do so with the manifestPlaceholders property.
-# This property takes a map of key-value pairs. (via a string)
-# Usage example : android.manifest_placeholders = [myCustomUrl:\"org.kivy.customurl\"]
-# android.manifest_placeholders = [:]
+android.manifest_placeholders = [:]
 
 # (bool) Skip byte compile for .py files
-# android.no-byte-compile-python = False
+android.no-byte-compile-python = False
 
 # (str) The format used to package the app for release mode (aab or apk or aar).
-# android.release_artifact = aab
+android.release_artifact = apk
 
 # (str) The format used to package the app for debug mode (apk or aar).
-# android.debug_artifact = apk
+android.debug_artifact = apk
+
+# (int) Android API to use (targetSdkVersion AND compileSdkVersion)
+android.api = 33
+
+# (int) Minimum API your APK / AAB will support.
+android.minapi = 21
+
+# (str) Android NDK version to use
+android.ndk = 25b
+
+# (int) Android NDK API to use. This is the minimum API your app will support, it should usually match android.minapi.
+android.ndk_api = 21
+
+# (bool) Use --private data storage (True) or --dir public storage (False)
+android.private_storage = True
+
+# (str) Android NDK directory (if empty, it will be automatically downloaded.)
+#android.ndk_path =
+
+# (str) Android SDK directory (if empty, it will be automatically downloaded.)
+#android.sdk_path =
+
+# (str) ANT directory (if empty, it will be automatically downloaded.)
+#android.ant_path =
+
+# (bool) If True, then skip trying to update the Android sdk
+# This can be useful to avoid excess Internet downloads or save time
+# when an update is due and you just want to test/build your package
+android.skip_update = False
+
+# (bool) If True, then automatically accept SDK license
+# agreements. This is intended for automation only. If set to False,
+# the default, you will be shown the license when first running
+# buildozer.
+android.accept_sdk_license = True
+
+# (str) The Android arch to build for, choices: armeabi-v7a, arm64-v8a, x86, x86_64
+# android.arch = arm64-v8a
 
 #
 # Python for android (p4a) specific
@@ -165,21 +182,16 @@ android.allow_backup = True
 #p4a.hook =
 
 # (str) Bootstrap to use for android builds
-# p4a.bootstrap = sdl2
+p4a.bootstrap = sdl2
 
 # (int) port number to specify an explicit --port= p4a argument (eg for bootstrap flask)
 #p4a.port =
 
 # Control passing the --use-setup-py vs --ignore-setup-py to p4a
-# "in the future" --use-setup-py is going to be the default behaviour in p4a, right now it is not
-# Setting this to false will pass --ignore-setup-py, true will pass --use-setup-py
-# NOTE: this is general setuptools integration, having pyproject.toml is enough, no need to generate
-# setup.py if you're using Poetry, but you need to add "toml" to source.include_exts.
-#p4a.setup_py = false
+p4a.setup_py = false
 
 # (str) extra command line arguments to pass when invoking pythonforandroid.toolchain
 #p4a.extra_args =
-
 
 #
 # iOS specific
@@ -202,7 +214,6 @@ ios.ios_deploy_branch = 1.10.0
 ios.codesign.allowed = false
 
 # (str) Name of the certificate to use for signing the debug version
-# Get a list of available identities: Xcode > Window > Devices and Simulators > Select a device > Right click > Show Provisioning Profiles
 #ios.codesign.debug = "iPhone Developer: <lastname> <firstname> (<hexstring>)"
 
 # (str) The development team to use for signing the debug version
@@ -215,15 +226,12 @@ ios.codesign.allowed = false
 #ios.codesign.development_team.release = <hexstring>
 
 # (str) URL pointing to .ipa file to be installed
-# This option should be defined along with `display-image-url`.
 #ios.manifest.app_url =
 
 # (str) URL pointing to an icon (57x57px) to be displayed during download
-# This option should be defined along with `app-url`.
 #ios.manifest.display_image_url =
 
 # (str) URL pointing to a larger icon (512x512px) to be displayed during download
-# This option should be defined along with `app-url`.
 #ios.manifest.full_size_image_url =
 
 [buildozer]
@@ -239,40 +247,3 @@ warn_on_root = 1
 
 # (str) Path to build output (i.e. .apk, .aab, .ipa) storage
 # bin_dir = ./bin
-
-#    -----------------------------------------------------------------------------
-#    List as sections
-#
-#    You can define all the "list" as [section:key].
-#    Each line will be considered as a option to the list.
-#    Let's take [app] / source.exclude_patterns.
-#    Instead of doing:
-#
-#[app]
-#source.exclude_patterns = license,data/audio/*.wav,data/images/original/*
-#
-#    This can be translated into:
-#
-#[app:source.exclude_patterns]
-#license
-#data/audio/*.wav
-#data/images/original/*
-#
-
-#    -----------------------------------------------------------------------------
-#    Profiles
-#
-#    You can extend section / key with a profile
-#    For example, you want to deploy a demo version of your application without
-#    HD content. You could first change the title to add "(demo)" in the name
-#    and extend the excluded directories to remove the HD content.
-#
-#[app@demo]
-#title = My Application (demo)
-#
-#[app:source.exclude_patterns@demo]
-#images/hd/*
-#
-#    Then, invoke the command line with the "demo" profile:
-#
-#buildozer --profile demo android debug
