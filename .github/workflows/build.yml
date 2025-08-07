@@ -30,27 +30,64 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v2
       
+    - name: Download and setup Android command-line tools
+      run: |
+        ANDROID_SDK_ROOT=$HOME/.buildozer/android/platform/android-sdk
+        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+        
+        # Create SDK directory structure
+        mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+        
+        # Download command-line tools
+        cd "$ANDROID_SDK_ROOT/cmdline-tools"
+        wget https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
+        unzip -q cmdline-tools.zip
+        mv cmdline-tools latest
+        rm cmdline-tools.zip
+        
+        # Add to PATH
+        echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
+        echo "$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_PATH
+        
+        # Verify sdkmanager is available
+        ls -la "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+        
+    - name: Accept Android SDK licenses
+      run: |
+        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
+      
     - name: Install Android build-tools
       run: |
-        sdkmanager "build-tools;34.0.0"
-        sdkmanager "platforms;android-33"
-        sdkmanager "platform-tools"
+        SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+        
+        # Install required Android components
+        $SDKMANAGER "build-tools;34.0.0"
+        $SDKMANAGER "platforms;android-33"
+        $SDKMANAGER "platform-tools"
+        
+        # Verify installation
+        echo "✅ Installed components:"
+        ls -la "$ANDROID_SDK_ROOT/build-tools/" || echo "❌ build-tools not found"
+        ls -la "$ANDROID_SDK_ROOT/platforms/" || echo "❌ platforms not found"
+        ls -la "$ANDROID_SDK_ROOT/platform-tools/" || echo "❌ platform-tools not found"
         
     - name: Ensure build-tools in expected location
       run: |
-        BUILD_TOOLS_PATH=$HOME/.buildozer/android/platform/android-sdk/build-tools
-        if [ ! -d "$BUILD_TOOLS_PATH" ]; then
-          ANDROID_SDK_ROOT=$(dirname $(dirname $(which sdkmanager)))
-          mkdir -p "$BUILD_TOOLS_PATH"
-          if [ -d "$ANDROID_SDK_ROOT/build-tools/34.0.0" ]; then
-            cp -r "$ANDROID_SDK_ROOT/build-tools/34.0.0" "$BUILD_TOOLS_PATH/"
-            echo "✅ Copied build-tools to Buildozer expected location"
-          else
-            echo "❌ Source build-tools not found at $ANDROID_SDK_ROOT/build-tools/34.0.0"
-            ls -la "$ANDROID_SDK_ROOT/build-tools/" || echo "build-tools directory not found"
-          fi
+        # Buildozer might also look for legacy tools structure
+        LEGACY_TOOLS_PATH="$ANDROID_SDK_ROOT/tools/bin"
+        mkdir -p "$LEGACY_TOOLS_PATH"
+        
+        # Create symlink to sdkmanager in legacy location if needed
+        if [ ! -f "$LEGACY_TOOLS_PATH/sdkmanager" ]; then
+          ln -sf "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "$LEGACY_TOOLS_PATH/sdkmanager"
+        fi
+        
+        # Verify aidl is available in build-tools
+        AIDL_PATH="$ANDROID_SDK_ROOT/build-tools/34.0.0/aidl"
+        if [ -f "$AIDL_PATH" ]; then
+          echo "✅ AIDL found at $AIDL_PATH"
         else
-          echo "✅ Build-tools already exist in expected location"
+          echo "❌ AIDL not found at $AIDL_PATH"
         fi
       
     - name: Cache pip dependencies
@@ -110,11 +147,21 @@ jobs:
           
     - name: Build APK with Buildozer
       run: |
+        # Set all Android environment variables
         export ANDROID_SDK_ROOT=$HOME/.buildozer/android/platform/android-sdk
         export ANDROID_HOME=$ANDROID_SDK_ROOT
+        export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH
+        
+        # Debug output
         echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
         echo "ANDROID_HOME=$ANDROID_HOME"
-        ls -la $ANDROID_SDK_ROOT/build-tools/ || echo "No build-tools found"
+        echo "PATH=$PATH"
+        
+        # Verify tools are available
+        which sdkmanager || echo "❌ sdkmanager not in PATH"
+        ls -la "$ANDROID_SDK_ROOT/build-tools/34.0.0/aidl" || echo "❌ aidl not found"
+        
+        # Run buildozer
         buildozer android debug
         
     - name: Upload APK artifact
