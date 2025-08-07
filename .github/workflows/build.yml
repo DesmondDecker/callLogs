@@ -10,7 +10,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04  # Use specific Ubuntu version for consistency
+    runs-on: ubuntu-22.04
     
     steps:
     - name: Checkout code
@@ -25,9 +25,9 @@ jobs:
       uses: actions/setup-java@v3
       with:
         distribution: 'temurin'
-        java-version: '11'  # Changed from 17 to 11 for better compatibility
+        java-version: '11'
         
-    - name: Install comprehensive build dependencies
+    - name: Install system dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y \
@@ -57,7 +57,6 @@ jobs:
           tk-dev \
           libxml2-dev \
           libxmlsec1-dev \
-          libffi-dev \
           liblzma-dev \
           ffmpeg \
           libsdl2-dev \
@@ -70,30 +69,22 @@ jobs:
           libavcodec-dev \
           libgstreamer1.0-dev \
           libgstreamer-plugins-base1.0-dev \
-          ccache
-        
-        # Verify critical tools are installed
-        echo "Verifying autotools installation:"
-        autoconf --version
-        automake --version
-        libtool --version
-        which libtoolize
-        aclocal --version
+          ccache \
+          zip \
+          openjdk-11-jdk
         
     - name: Setup Android SDK
-      uses: android-actions/setup-android@v3
-      
-    - name: Download and setup Android command-line tools
       run: |
-        ANDROID_SDK_ROOT=$HOME/android-sdk
+        export ANDROID_SDK_ROOT=$HOME/android-sdk
         echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+        echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
         
         # Create SDK directory structure
         mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
         
-        # Download command-line tools
+        # Download and extract command-line tools
         cd "$ANDROID_SDK_ROOT/cmdline-tools"
-        wget https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
         unzip -q cmdline-tools.zip
         mv cmdline-tools latest
         rm cmdline-tools.zip
@@ -101,49 +92,58 @@ jobs:
         # Add to PATH
         echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
         echo "$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_PATH
+        echo "$ANDROID_SDK_ROOT/build-tools/33.0.2" >> $GITHUB_PATH
         
-        # Verify sdkmanager is available
-        ls -la "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-        
-    - name: Accept Android SDK licenses and install components
+    - name: Install Android SDK components
       run: |
+        export ANDROID_SDK_ROOT=$HOME/android-sdk
+        export ANDROID_HOME=$ANDROID_SDK_ROOT
         SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
         
-        # Accept licenses first
-        yes | $SDKMANAGER --licenses || true
+        # Accept licenses
+        yes | $SDKMANAGER --licenses > /dev/null 2>&1 || true
         
-        # Install required Android components
+        # Install components
         $SDKMANAGER "build-tools;33.0.2"
         $SDKMANAGER "platforms;android-33"
         $SDKMANAGER "platform-tools"
         $SDKMANAGER "cmake;3.22.1"
         $SDKMANAGER "ndk;25.1.8937393"
         
-        # Verify installation
-        echo "✅ Installed components:"
-        ls -la "$ANDROID_SDK_ROOT/build-tools/" || echo "❌ build-tools not found"
-        ls -la "$ANDROID_SDK_ROOT/platforms/" || echo "❌ platforms not found"
-        ls -la "$ANDROID_SDK_ROOT/platform-tools/" || echo "❌ platform-tools not found"
+        # Set NDK environment
+        export ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/25.1.8937393
+        echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
+        echo "NDK_HOME=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
         
     - name: Cache pip dependencies
       uses: actions/cache@v3
       with:
         path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
         restore-keys: |
           ${{ runner.os }}-pip-
+          
+    - name: Cache Buildozer directories
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.buildozer
+          .buildozer
+        key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}-v3
+        restore-keys: |
+          ${{ runner.os }}-buildozer-v3-
           
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
         pip install --upgrade setuptools wheel
         pip install -r requirements.txt
-        pip install buildozer==1.5.0 cython==0.29.36
         
-    - name: Create and configure buildozer.spec
+    - name: Verify buildozer.spec exists
       run: |
-        # Copy the buildozer.spec from paste.txt content
-        cat > buildozer.spec << 'EOF'
+        if [ ! -f buildozer.spec ]; then
+          echo "Creating buildozer.spec from paste.txt content..."
+          cat > buildozer.spec << 'EOF'
         [app]
         title = Kortahun United
         package.name = kortahununited
@@ -159,129 +159,98 @@ jobs:
         android.logcat_filters = *:S python:D
         android.archs = arm64-v8a, armeabi-v7a
         android.allow_backup = True
+        android.api = 33
+        android.minapi = 21
+        android.ndk = 25b
+        android.ndk_api = 21
+        android.accept_sdk_license = True
+        android.private_storage = True
         
         [buildozer]
         log_level = 2
         warn_on_root = 1
         EOF
+        fi
         
-        # Verify the spec file was created
-        echo "✅ Created buildozer.spec:"
+        echo "✅ buildozer.spec content:"
         head -20 buildozer.spec
         
-    - name: Cache Buildozer directories
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.buildozer
-          .buildozer
-        key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}-v2
-        restore-keys: |
-          ${{ runner.os }}-buildozer-v2-
-          
-    - name: Setup environment for build
+    - name: Setup build environment
       run: |
-        # Set all Android environment variables
+        # Set environment variables
         export ANDROID_SDK_ROOT=$HOME/android-sdk
         export ANDROID_HOME=$ANDROID_SDK_ROOT
         export ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/25.1.8937393
+        export NDK_HOME=$ANDROID_NDK_ROOT
         export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/build-tools/33.0.2:$PATH
         
-        # Set build environment variables
-        export CC=gcc
-        export CXX=g++
-        export AR=ar
-        export STRIP=strip
-        export MAKE=make
-        
-        # Set autotools environment variables
-        export ACLOCAL_PATH="/usr/share/aclocal:$ACLOCAL_PATH"
-        export PKG_CONFIG_PATH="/usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH"
-        export LIBTOOLIZE=libtoolize
-        export AUTOMAKE_LIBDIR=/usr/share/automake-1.16
-        
-        # Write environment to GITHUB_ENV for subsequent steps
+        # Persist to GitHub environment
         echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
         echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-        echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/25.1.8937393" >> $GITHUB_ENV
-        echo "CC=gcc" >> $GITHUB_ENV
-        echo "CXX=g++" >> $GITHUB_ENV
-        echo "AR=ar" >> $GITHUB_ENV
-        echo "STRIP=strip" >> $GITHUB_ENV
-        echo "MAKE=make" >> $GITHUB_ENV
-        echo "ACLOCAL_PATH=/usr/share/aclocal:$ACLOCAL_PATH" >> $GITHUB_ENV
-        echo "PKG_CONFIG_PATH=/usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
-        echo "LIBTOOLIZE=libtoolize" >> $GITHUB_ENV
-        echo "AUTOMAKE_LIBDIR=/usr/share/automake-1.16" >> $GITHUB_ENV
+        echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
+        echo "NDK_HOME=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
         
-        # Debug output
-        echo "Environment setup completed:"
-        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-        echo "ANDROID_HOME=$ANDROID_HOME"
-        echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT"
+        # Build tool settings
+        echo "USE_SDK_WRAPPER=1" >> $GITHUB_ENV
+        echo "ANDROID_SDK_BUILD_TOOLS_VERSION=33.0.2" >> $GITHUB_ENV
+        echo "ANDROIDAPI=33" >> $GITHUB_ENV
+        echo "NDKAPI=21" >> $GITHUB_ENV
         
-        # Verify critical tools are available
-        which autoconf || echo "❌ autoconf not found"
-        which automake || echo "❌ automake not found"
-        which libtool || echo "❌ libtool not found"
-        which libtoolize || echo "❌ libtoolize not found"
-        which aclocal || echo "❌ aclocal not found"
-        which sdkmanager || echo "❌ sdkmanager not in PATH"
-        which gcc || echo "❌ gcc not found"
-        which make || echo "❌ make not found"
+        # Verify installations
+        echo "🔍 Verifying Android tools:"
+        ls -la "$ANDROID_SDK_ROOT/build-tools/33.0.2/" || echo "❌ build-tools not found"
+        ls -la "$ANDROID_SDK_ROOT/platforms/android-33/" || echo "❌ platform not found"
+        ls -la "$ANDROID_NDK_ROOT/" || echo "❌ NDK not found"
         
-        # Check for AIDL and other Android tools
-        ls -la "$ANDROID_SDK_ROOT/build-tools/33.0.2/aidl" || echo "❌ aidl not found"
+        # Java settings
+        echo "JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64" >> $GITHUB_ENV
+        echo "JDK_HOME=/usr/lib/jvm/java-11-openjdk-amd64" >> $GITHUB_ENV
         
-        # Verify autotools macros
-        echo "Autotools macro directories:"
-        find /usr/share/aclocal -name "*libtool*" -type f | head -5
-        
-    - name: Pre-build cleanup and preparation
+    - name: Initialize buildozer
       run: |
-        # Clean any previous build artifacts
-        rm -rf .buildozer/android/platform/python-for-android/build/
-        rm -rf .buildozer/android/platform/python-for-android/dists/
+        # Initialize buildozer (this will create necessary directories)
+        buildozer android clean || echo "Clean failed, continuing..."
         
-        # Run autoupdate to fix potential macro issues
-        find . -name "configure.ac" -o -name "configure.in" | head -5 | while read configure_file; do
-          if [ -f "$configure_file" ]; then
-            echo "Running autoupdate on $configure_file"
-            cd "$(dirname "$configure_file")"
-            autoupdate || echo "autoupdate failed for $configure_file"
-            cd - > /dev/null
-          fi
-        done
-        
-        # Regenerate autotools files if they exist
-        if [ -f configure.ac ] || [ -f configure.in ]; then
-          echo "Regenerating autotools files..."
-          aclocal -I /usr/share/aclocal || echo "aclocal failed"
-          autoheader || echo "autoheader failed" 
-          libtoolize --force --copy || echo "libtoolize failed"
-          autoconf || echo "autoconf failed"
-          automake --add-missing --copy || echo "automake failed"
-        fi
+        # Set up buildozer environment
+        mkdir -p .buildozer/android/platform/
         
     - name: Build APK with Buildozer
       run: |
-        # Verify environment is properly set
-        echo "Final environment check:"
-        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-        echo "ANDROID_HOME=$ANDROID_HOME"
-        echo "PATH=$PATH"
+        echo "🚀 Starting APK build..."
+        echo "Current directory: $(pwd)"
+        echo "Files in directory:"
+        ls -la
         
-        # Run buildozer with verbose output for debugging
-        buildozer -v android debug 2>&1 | tee build.log
+        # Verify environment
+        echo "Environment check:"
+        echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+        echo "ANDROID_NDK_ROOT: $ANDROID_NDK_ROOT"
+        echo "Java version: $(java -version 2>&1 | head -n 1)"
+        echo "Python version: $(python --version)"
+        echo "Buildozer version: $(buildozer version)"
         
-        # Check if APK was created
-        if [ -f "bin/*.apk" ]; then
-          echo "✅ APK build successful"
+        # Build with increased verbosity and error handling
+        set -e
+        buildozer -v android debug 2>&1 | tee build.log || {
+          echo "❌ Build failed! Last 50 lines of build log:"
+          tail -50 build.log
+          echo "📋 Full build log saved as artifact"
+          exit 1
+        }
+        
+        # Verify APK was created
+        if ls bin/*.apk 1> /dev/null 2>&1; then
+          echo "✅ APK build successful!"
           ls -la bin/
+          
+          # Get APK info
+          APK_FILE=$(ls bin/*.apk | head -1)
+          APK_SIZE=$(du -h "$APK_FILE" | cut -f1)
+          echo "📦 APK: $APK_FILE (Size: $APK_SIZE)"
         else
-          echo "❌ APK build failed"
-          echo "Last 100 lines of build log:"
-          tail -100 build.log
+          echo "❌ No APK found in bin/ directory"
+          echo "Contents of bin directory:"
+          ls -la bin/ || echo "bin directory does not exist"
           exit 1
         fi
         
@@ -291,17 +260,63 @@ jobs:
       with:
         name: build-log-${{ github.sha }}
         path: build.log
+        retention-days: 7
         
     - name: Upload APK artifact
+      if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: kortahun-united-debug-${{ github.sha }}
+        name: kortahun-united-apk-${{ github.sha }}
         path: bin/*.apk
+        retention-days: 30
         
-    - name: Upload APK to release (if release event)
-      if: github.event_name == 'release'
+    - name: Upload APK to release
+      if: github.event_name == 'release' && success()
       uses: softprops/action-gh-release@v1
       with:
         files: bin/*.apk
+        name: "Kortahun United v${{ github.ref_name }}"
+        body: |
+          ## Kortahun United Android App
+          
+          **Version:** ${{ github.ref_name }}
+          **Build:** ${{ github.sha }}
+          **Built:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+          
+          ### Features
+          - Real Android call log tracking
+          - Backend synchronization
+          - QR code device registration
+          - Automatic heartbeat monitoring
+          
+          ### Requirements
+          - Android 5.0+ (API 21+)
+          - Internet connection for sync
+          - Call log permissions
+          
+          **Download the APK below and enable "Install from unknown sources" in your Android settings.**
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Build summary
+      if: always()
+      run: |
+        echo "## 📱 Build Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Repository:** ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Runner:** ubuntu-22.04" >> $GITHUB_STEP_SUMMARY
+        echo "**Java:** 11" >> $GITHUB_STEP_SUMMARY
+        echo "**Python:** 3.9" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -f bin/*.apk ]; then
+          APK_FILE=$(ls bin/*.apk | head -1)
+          APK_SIZE=$(du -h "$APK_FILE" | cut -f1)
+          echo "**✅ Build Status:** SUCCESS" >> $GITHUB_STEP_SUMMARY
+          echo "**📦 APK:** $(basename "$APK_FILE")" >> $GITHUB_STEP_SUMMARY
+          echo "**💾 Size:** $APK_SIZE" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "**❌ Build Status:** FAILED" >> $GITHUB_STEP_SUMMARY
+        fi
