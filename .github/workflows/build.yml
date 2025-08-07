@@ -21,11 +21,11 @@ jobs:
       with:
         python-version: 3.9
         
-    - name: Set up Java 11
-      uses: actions/setup-java@v3
+    - name: Set up Java 17
+      uses: actions/setup-java@v4
       with:
         distribution: 'temurin'
-        java-version: '11'
+        java-version: '17'
         
     - name: Install system dependencies
       run: |
@@ -61,7 +61,7 @@ jobs:
           liblzma-dev \
           ccache \
           zip \
-          openjdk-11-jdk
+          openjdk-17-jdk
         
         # Fix any broken installations
         sudo apt-get install -f -y
@@ -93,7 +93,7 @@ jobs:
         # Create SDK directory structure
         mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
         
-        # Download and extract command-line tools
+        # Download and extract command-line tools (latest version compatible with Java 17)
         cd "$ANDROID_SDK_ROOT/cmdline-tools"
         wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
         unzip -q cmdline-tools.zip
@@ -103,26 +103,31 @@ jobs:
         # Add to PATH
         echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
         echo "$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_PATH
-        echo "$ANDROID_SDK_ROOT/build-tools/33.0.2" >> $GITHUB_PATH
+        echo "$ANDROID_SDK_ROOT/build-tools/34.0.0" >> $GITHUB_PATH
         
     - name: Install Android SDK components
       run: |
         export ANDROID_SDK_ROOT=$HOME/android-sdk
         export ANDROID_HOME=$ANDROID_SDK_ROOT
+        export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
         SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
         
-        # Accept licenses
+        # Verify Java version for SDK manager
+        echo "Java version for SDK manager:"
+        java -version
+        
+        # Accept licenses first
         yes | $SDKMANAGER --licenses > /dev/null 2>&1 || true
         
-        # Install components
-        $SDKMANAGER "build-tools;33.0.2"
-        $SDKMANAGER "platforms;android-33"
+        # Install components with updated versions
+        $SDKMANAGER "build-tools;34.0.0"
+        $SDKMANAGER "platforms;android-34"
         $SDKMANAGER "platform-tools"
         $SDKMANAGER "cmake;3.22.1"
-        $SDKMANAGER "ndk;25.1.8937393"
+        $SDKMANAGER "ndk;25.2.9519653"
         
         # Set NDK environment
-        export ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/25.1.8937393
+        export ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/25.2.9519653
         echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
         echo "NDK_HOME=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
         
@@ -140,9 +145,9 @@ jobs:
         path: |
           ~/.buildozer
           .buildozer
-        key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}-v4
+        key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}-v5
         restore-keys: |
-          ${{ runner.os }}-buildozer-v4-
+          ${{ runner.os }}-buildozer-v5-
           
     - name: Install Python dependencies
       run: |
@@ -170,7 +175,7 @@ jobs:
         android.logcat_filters = *:S python:D
         android.archs = arm64-v8a, armeabi-v7a
         android.allow_backup = True
-        android.api = 33
+        android.api = 34
         android.minapi = 21
         android.ndk = 25b
         android.ndk_api = 21
@@ -191,34 +196,37 @@ jobs:
         
     - name: Setup build environment
       run: |
-        # Set environment variables
+        # Set environment variables with Java 17
         export ANDROID_SDK_ROOT=$HOME/android-sdk
         export ANDROID_HOME=$ANDROID_SDK_ROOT
-        export ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/25.1.8937393
+        export ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/25.2.9519653
         export NDK_HOME=$ANDROID_NDK_ROOT
-        export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/build-tools/33.0.2:$PATH
+        export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+        export JDK_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+        export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/build-tools/34.0.0:$PATH
         
         # Persist to GitHub environment
         echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
         echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
         echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
         echo "NDK_HOME=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
+        echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
+        echo "JDK_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
         
         # Build tool settings
         echo "USE_SDK_WRAPPER=1" >> $GITHUB_ENV
-        echo "ANDROID_SDK_BUILD_TOOLS_VERSION=33.0.2" >> $GITHUB_ENV
-        echo "ANDROIDAPI=33" >> $GITHUB_ENV
+        echo "ANDROID_SDK_BUILD_TOOLS_VERSION=34.0.0" >> $GITHUB_ENV
+        echo "ANDROIDAPI=34" >> $GITHUB_ENV
         echo "NDKAPI=21" >> $GITHUB_ENV
         
         # Verify installations
         echo "🔍 Verifying Android tools:"
-        ls -la "$ANDROID_SDK_ROOT/build-tools/33.0.2/" || echo "❌ build-tools not found"
-        ls -la "$ANDROID_SDK_ROOT/platforms/android-33/" || echo "❌ platform not found"
+        echo "Java version:"
+        java -version
+        echo "JAVA_HOME: $JAVA_HOME"
+        ls -la "$ANDROID_SDK_ROOT/build-tools/34.0.0/" || echo "❌ build-tools not found"
+        ls -la "$ANDROID_SDK_ROOT/platforms/android-34/" || echo "❌ platform not found"
         ls -la "$ANDROID_NDK_ROOT/" || echo "❌ NDK not found"
-        
-        # Java settings
-        echo "JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64" >> $GITHUB_ENV
-        echo "JDK_HOME=/usr/lib/jvm/java-11-openjdk-amd64" >> $GITHUB_ENV
         
     - name: Initialize buildozer
       run: |
@@ -239,9 +247,14 @@ jobs:
         echo "Environment check:"
         echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
         echo "ANDROID_NDK_ROOT: $ANDROID_NDK_ROOT"
+        echo "JAVA_HOME: $JAVA_HOME"
         echo "Java version: $(java -version 2>&1 | head -n 1)"
         echo "Python version: $(python --version)"
         echo "Buildozer version: $(buildozer version)"
+        
+        # Set environment variables for build
+        export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+        export JDK_HOME=/usr/lib/jvm/java-17-openjdk-amd64
         
         # Build with increased verbosity and error handling
         set -e
@@ -321,7 +334,7 @@ jobs:
         echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
         echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
         echo "**Runner:** ubuntu-22.04" >> $GITHUB_STEP_SUMMARY
-        echo "**Java:** 11" >> $GITHUB_STEP_SUMMARY
+        echo "**Java:** 17" >> $GITHUB_STEP_SUMMARY
         echo "**Python:** 3.9" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         

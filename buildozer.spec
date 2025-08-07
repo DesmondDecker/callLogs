@@ -118,13 +118,13 @@ android.release_artifact = apk
 # (str) The format used to package the app for debug mode (apk or aar).
 android.debug_artifact = apk
 
-# (int) Android API to use (targetSdkVersion AND compileSdkVersion)
-android.api = 33
+# (int) Android API to use (targetSdkVersion AND compileSdkVersion) - Updated to 34
+android.api = 34
 
 # (int) Minimum API your APK / AAB will support.
 android.minapi = 21
 
-# (str) Android NDK version to use
+# (str) Android NDK version to use - Updated to latest stable
 android.ndk = 25b
 
 # (int) Android NDK API to use. This is the minimum API your app will support, it should usually match android.minapi.
@@ -246,8 +246,4 @@ warn_on_root = 1
 # build_dir = ./.buildozer
 
 # (str) Path to build output (i.e. .apk, .aab, .ipa) storage
-# bin_dir = ./bin   
-
-
-
-
+# bin_dir = ./bin
