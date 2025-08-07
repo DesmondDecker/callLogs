@@ -3,359 +3,105 @@ name: Build Android APK
 on:
   push:
     branches: [ main, develop ]
-    tags:
-      - 'v*'
   pull_request:
     branches: [ main ]
-  workflow_dispatch:
+  release:
+    types: [published]
 
 jobs:
-  build-android:
-    runs-on: ubuntu-22.04
+  build:
+    runs-on: ubuntu-latest
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Setup Python
-      uses: actions/setup-python@v5
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v4
       with:
-        python-version: '3.11'
+        python-version: 3.9
         
-    - name: Setup Java
-      uses: actions/setup-java@v4
+    - name: Set up Java 11
+      uses: actions/setup-java@v3
       with:
         distribution: 'temurin'
-        java-version: '17'
+        java-version: '11'
         
     - name: Setup Android SDK
-      uses: android-actions/setup-android@v3
+      uses: android-actions/setup-android@v2
+      
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
       with:
-        api-level: 33
-        build-tools: 33.0.2
-        ndk-version: '25.2.9519653'
-        
-    - name: Cache buildozer global directory
-      uses: actions/cache@v4
-      with:
-        path: ~/.buildozer
-        key: buildozer-global-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
         restore-keys: |
-          buildozer-global-${{ runner.os }}-
-          
-    - name: Cache buildozer directory
-      uses: actions/cache@v4
-      with:
-        path: .buildozer
-        key: buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}-${{ hashFiles('requirements.txt') }}
-        restore-keys: |
-          buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}-
-          buildozer-${{ runner.os }}-
+          ${{ runner.os }}-pip-
           
     - name: Install system dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y \
-          python3-pip \
-          python3-venv \
-          python3-dev \
           build-essential \
           git \
-          unzip \
-          openjdk-17-jdk \
-          autoconf \
-          libtool \
-          pkg-config \
+          ffmpeg \
+          libsdl2-dev \
+          libsdl2-image-dev \
+          libsdl2-mixer-dev \
+          libsdl2-ttf-dev \
+          libportmidi-dev \
+          libswscale-dev \
+          libavformat-dev \
+          libavcodec-dev \
           zlib1g-dev \
-          libncurses5-dev \
-          libncursesw5-dev \
-          libtinfo5 \
-          cmake \
-          libffi-dev \
-          libssl-dev \
-          ccache \
-          lld \
-          llvm \
-          libltdl-dev \
-          python3-distutils \
-          python3-setuptools \
-          python3-wheel \
-          cython3 \
-          zip \
-          default-jdk \
-          gradle
+          libgstreamer1.0-dev \
+          libgstreamer-plugins-base1.0-dev
           
-    - name: Create virtual environment
-      run: |
-        python3 -m venv venv
-        source venv/bin/activate
-        echo "VIRTUAL_ENV=$VIRTUAL_ENV" >> $GITHUB_ENV
-        echo "$VIRTUAL_ENV/bin" >> $GITHUB_PATH
-        
     - name: Install Python dependencies
       run: |
-        source venv/bin/activate
-        python -m pip install --upgrade pip setuptools wheel
-        pip install --upgrade buildozer==1.5.0 cython==3.0.8
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install buildozer cython
         
-        # Install development dependencies (excluding Android-specific packages)
-        if [ -f requirements-dev.txt ]; then
-          pip install -r requirements-dev.txt
-        else
-          # Fallback to manual installation if requirements-dev.txt doesn't exist
-          pip install kivy==2.2.0 plyer==2.1.0 requests==2.31.0 urllib3==2.0.7 certifi==2023.11.17 charset-normalizer==3.3.2 idna==3.6 python-dateutil==2.8.2 simplejson==3.19.2 colorama==0.4.6 six==1.16.0
+    - name: Create buildozer.spec if not exists
+      run: |
+        if [ ! -f buildozer.spec ]; then
+          buildozer init
         fi
         
-    - name: Setup Android environment variables
-      run: |
-        echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-        echo "JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64" >> $GITHUB_ENV
-        echo "NDK_VERSION=25.2.9519653" >> $GITHUB_ENV
-        echo "PYTHONPATH=$GITHUB_WORKSPACE:$PYTHONPATH" >> $GITHUB_ENV
-        
-    - name: Accept Android licenses
-      run: |
-        yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-        
-    - name: Verify buildozer installation
-      run: |
-        source venv/bin/activate
-        echo "=== Buildozer Version ==="
-        buildozer --version
-        
-        echo "=== Python Environment ==="
-        python --version
-        which python
-        
-        echo "=== Java Environment ==="
-        java -version
-        echo "JAVA_HOME: $JAVA_HOME"
-        
-        echo "=== Android Environment ==="
-        echo "ANDROID_HOME: $ANDROID_HOME"
-        echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
-        ls -la $ANDROID_HOME/ || echo "Android SDK directory not found"
-        
-        echo "=== Buildozer Spec Validation ==="
-        if [ -f buildozer.spec ]; then
-          echo "✅ buildozer.spec found"
-          # Check for common issues in spec
-          grep -n "requirements.*=" buildozer.spec || echo "No requirements line found"
-          grep -n "android.api.*=" buildozer.spec || echo "No android.api line found"
-        else
-          echo "❌ buildozer.spec not found!"
-          ls -la
-          exit 1
-        fi
-        
-    - name: Initialize buildozer
-      run: |
-        source venv/bin/activate
-        # Clean any previous builds
-        buildozer android clean || true
-        
-        # Verify buildozer can read the spec file
-        buildozer android update || echo "Update failed, continuing..."
-        
-    - name: Build APK (Debug) with detailed logging
-      run: |
-        source venv/bin/activate
-        
-        # Set buildozer to verbose mode and capture all output
-        export BUILDOZER_LOG_LEVEL=2
-        export PYTHONUNBUFFERED=1
-        
-        # Run buildozer with detailed logging
-        echo "Starting buildozer android debug..."
-        buildozer android debug --verbose 2>&1 | tee buildozer.log
-        
-        # Check if APK was created
-        if [ ! -f bin/*.apk ]; then
-          echo "❌ APK build failed!"
-          echo "=== BUILDOZER LOG TAIL ==="
-          tail -100 buildozer.log || echo "No buildozer.log found"
-          
-          echo "=== CHECKING BUILD DIRECTORY ==="
-          find .buildozer -name "*.log" -exec echo "Found log: {}" \; -exec tail -20 {} \; 2>/dev/null || echo "No build logs found"
-          
-          echo "=== PYTHON FOR ANDROID LOGS ==="
-          find .buildozer -path "*python-for-android*" -name "*.log" -exec echo "Found p4a log: {}" \; -exec tail -20 {} \; 2>/dev/null || echo "No p4a logs found"
-          
-          exit 1
-        else
-          echo "✅ APK build successful!"
-          ls -la bin/
-        fi
-        
-    - name: Build APK (Release) for tags
-      if: startsWith(github.ref, 'refs/tags/')
-      run: |
-        source venv/bin/activate
-        buildozer android release
-        
-    - name: Sign APK (Release)
-      if: startsWith(github.ref, 'refs/tags/')
-      run: |
-        # Create release keystore (for demo - use your own signing key in production)
-        if [ ! -f release.keystore ]; then
-          keytool -genkey -v -keystore release.keystore -alias callsync -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=CallSync, OU=Dev, O=KortahunUnited, L=Freetown, S=Western, C=SL" \
-            -storepass android -keypass android
-        fi
-        
-        # Find the unsigned APK
-        UNSIGNED_APK=$(find bin -name "*-release-unsigned.apk" | head -1)
-        if [ -n "$UNSIGNED_APK" ]; then
-          echo "Signing APK: $UNSIGNED_APK"
-          
-          # Sign the APK
-          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
-            -keystore release.keystore -storepass android -keypass android \
-            "$UNSIGNED_APK" callsync
-          
-          # Align the APK
-          $ANDROID_HOME/build-tools/33.0.2/zipalign -v 4 \
-            "$UNSIGNED_APK" \
-            "bin/callsync-release-signed.apk"
-            
-          echo "✅ APK signed and aligned successfully"
-        else
-          echo "❌ No unsigned APK found to sign"
-          ls -la bin/
-        fi
-        
-    - name: List build artifacts
-      run: |
-        echo "Build artifacts:"
-        find bin -name "*.apk" -exec ls -lh {} \; 2>/dev/null || echo "No APK files found"
-        
-    - name: Upload Debug APK
-      uses: actions/upload-artifact@v4
-      if: always()
+    - name: Cache Buildozer global directory
+      uses: actions/cache@v3
       with:
-        name: callsync-debug-apk-${{ github.run_number }}
-        path: bin/*-debug*.apk
-        retention-days: 30
-        compression-level: 6
-        if-no-files-found: warn
-        
-    - name: Upload Release APK
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: actions/upload-artifact@v4
+        path: ~/.buildozer
+        key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
+        restore-keys: |
+          ${{ runner.os }}-buildozer-
+          
+    - name: Cache Buildozer directory in project
+      uses: actions/cache@v3
       with:
-        name: callsync-release-apk-${{ github.ref_name }}
-        path: bin/callsync-release-signed.apk
-        retention-days: 90
-        compression-level: 6
-        if-no-files-found: error
+        path: .buildozer
+        key: ${{ runner.os }}-buildozer-project-${{ hashFiles('buildozer.spec') }}
+        restore-keys: |
+          ${{ runner.os }}-buildozer-project-
+          
+    - name: Build APK with Buildozer
+      run: |
+        buildozer android debug
         
-    - name: Create Release
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v2
+    - name: Upload APK artifact
+      uses: actions/upload-artifact@v3
       with:
-        files: |
-          bin/callsync-release-signed.apk
-          bin/*-debug*.apk
-        generate_release_notes: true
-        prerelease: false
-        tag_name: ${{ github.ref_name }}
-        name: "Call Log Sync Pro ${{ github.ref_name }}"
-        body: |
-          ## 📱 Call Log Sync Pro ${{ github.ref_name }}
-          
-          ### 🚀 Features
-          - Secure Android call log synchronization
-          - Modern Kivy-based UI with Material Design
-          - Multi-backend support with automatic failover
-          - Comprehensive error handling and retry logic
-          - Real-time sync status and progress tracking
-          
-          ### 📦 Downloads
-          - **Release APK**: `callsync-release-signed.apk` (Recommended for production)
-          - **Debug APK**: `*-debug.apk` (For testing and development)
-          
-          ### 🔧 Installation
-          1. Download the release APK
-          2. Enable "Unknown Sources" in Android settings
-          3. Install the APK
-          4. Grant required permissions
-          5. Start syncing!
-          
-          ### 🛡️ Permissions Required
-          - 📞 Read Call Log
-          - 📱 Read Phone State  
-          - 👥 Read Contacts
-          - 🌐 Internet Access
-          - 💾 Storage Access
-          
-          Built with ❤️ using Python + Kivy
+        name: kortahun-united-debug-${{ github.sha }}
+        path: bin/*.apk
+        
+    - name: Upload APK to release (if release event)
+      if: github.event_name == 'release'
+      uses: actions/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        
-    - name: Upload build logs on failure
-      if: failure()
-      uses: actions/upload-artifact@v4
       with:
-        name: build-logs-${{ github.run_number }}
-        path: |
-          .buildozer/android/platform/build-*/**/*.log
-          .buildozer/android/logs/*.log
-        retention-days: 7
-        if-no-files-found: ignore
-        
-    - name: Build summary
-      if: always()
-      run: |
-        echo "## 📱 Call Log Sync Pro - Build Summary" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        
-        if [ -f bin/*-debug*.apk ]; then
-          echo "### ✅ Build Status: SUCCESS" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "### ❌ Build Status: FAILED" >> $GITHUB_STEP_SUMMARY
-        fi
-        
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
-        echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
-        echo "| **Build Time** | $(date) |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Python Version** | 3.11 |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Java Version** | 17 |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Android API** | 33 |" >> $GITHUB_STEP_SUMMARY
-        echo "| **NDK Version** | 25.2.9519653 |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Target Arch** | arm64-v8a, armeabi-v7a |" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        
-        if [ -f bin/*-debug*.apk ]; then
-          DEBUG_APK=$(ls bin/*-debug*.apk 2>/dev/null | head -1)
-          if [ -n "$DEBUG_APK" ]; then
-            DEBUG_SIZE=$(ls -lh "$DEBUG_APK" | awk '{print $5}')
-            echo "| **Debug APK** | $DEBUG_APK ($DEBUG_SIZE) |" >> $GITHUB_STEP_SUMMARY
-          fi
-        fi
-        
-        if [ -f "bin/callsync-release-signed.apk" ]; then
-          RELEASE_SIZE=$(ls -lh bin/callsync-release-signed.apk | awk '{print $5}')
-          echo "| **Release APK** | callsync-release-signed.apk ($RELEASE_SIZE) |" >> $GITHUB_STEP_SUMMARY
-        fi
-        
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### 📦 Artifacts" >> $GITHUB_STEP_SUMMARY
-        if [ -f bin/*-debug*.apk ]; then
-          echo "- ✅ Debug APK available for download" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "- ❌ Debug APK build failed" >> $GITHUB_STEP_SUMMARY
-        fi
-        
-        if [ -f "bin/callsync-release-signed.apk" ]; then
-          echo "- ✅ Release APK available for download" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ GitHub Release created with APK attachments" >> $GITHUB_STEP_SUMMARY
-        fi
-        
-        echo "" >> $GITHUB_STEP_SUMMARY
-        if [ -f bin/*-debug*.apk ] || [ -f "bin/callsync-release-signed.apk" ]; then
-          echo "🎉 **Build completed successfully!**" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "💥 **Build failed - check logs for details**" >> $GITHUB_STEP_SUMMARY
-        fi
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: bin/KortahunUnited-debug.apk
+        asset_name: KortahunUnited-v${{ github.event.release.tag_name }}-debug.apk
+        asset_content_type: application/vnd.android.package-archive

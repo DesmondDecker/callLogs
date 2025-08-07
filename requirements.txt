@@ -1,34 +1,18 @@
-# Development requirements (can be installed via pip)
-# Use this file for local development and testing
+# Core framework
+kivy==2.1.0
+kivymd==1.1.1
 
-# Core Kivy framework
-kivy==2.2.0
-
-# Platform utilities
-plyer==2.1.0
-
-# HTTP requests
+# Network requests
 requests==2.31.0
 urllib3==2.0.7
-certifi==2023.11.17
-charset-normalizer==3.3.2
-idna==3.6
+
+# Android bindings (will be available when running on Android)
+pyjnius==1.4.2
 
 # Build tools
 buildozer==1.5.0
-cython==3.0.8
+cython==0.29.36
 
-# Utilities
-simplejson==3.19.2
-colorama==0.4.6
-python-dateutil==2.8.2
-six==1.16.0
-
-# Development tools
-pytest==7.4.4
+# Development and testing
+pytest==7.4.3
 pytest-cov==4.1.0
-black==23.12.1
-flake8==7.0.0
-
-# Note: Android-specific packages (pyjnius, android) are only available 
-# during the buildozer build process and cannot be installed via pip
