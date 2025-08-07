@@ -115,7 +115,13 @@ jobs:
           libavcodec-dev \
           zlib1g-dev \
           libgstreamer1.0-dev \
-          libgstreamer-plugins-base1.0-dev
+          libgstreamer-plugins-base1.0-dev \
+          autoconf \
+          automake \
+          libtool \
+          autoconf-archive \
+          pkg-config \
+          gettext
           
     - name: Install Python dependencies
       run: |
