@@ -30,6 +30,12 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v2
       
+    - name: Install Android build-tools
+      run: |
+        sdkmanager "build-tools;34.0.0"
+        sdkmanager "platforms;android-33"
+        sdkmanager "platform-tools"
+      
     - name: Cache pip dependencies
       uses: actions/cache@v3
       with:
