@@ -119,6 +119,7 @@ jobs:
           autoconf \
           automake \
           libtool \
+          libtool-bin \
           autoconf-archive \
           pkg-config \
           gettext
