@@ -1,18 +1,32 @@
-# Core framework
-kivy==2.1.0
-kivymd==1.1.1
+# Core framework - Updated to latest stable versions
+kivy==2.3.0
+kivymd==1.2.0
 
-# Network requests
-requests==2.31.0
-urllib3==2.0.7
+# Network requests - Updated to latest secure versions
+requests==2.32.3
+urllib3==2.2.3
+certifi==2024.8.30
+charset-normalizer==3.4.0
+idna==3.10
 
-# Android bindings (will be available when running on Android)
-pyjnius==1.4.2
+# Android bindings (available when running on Android)
+pyjnius==1.6.1
 
-# Build tools
+# Android platform integration
+plyer==2.1.0
+
+# Build tools - Updated to latest stable versions
 buildozer==1.5.0
-cython==0.29.36
+cython==3.0.11
 
 # Development and testing
-pytest==7.4.3
-pytest-cov==4.1.0
+pytest==8.3.3
+pytest-cov==5.0.0
+
+# Additional dependencies for better compatibility
+setuptools==75.1.0
+wheel==0.44.0
+pip==24.2
+
+# Security updates
+cryptography==43.0.1
