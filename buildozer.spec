@@ -123,6 +123,9 @@ android.extra_manifest_xml = %(source.dir)s/src/android/extra_manifest.xml
 # use that parameter to provide a filename from where to load your custom XML arguments:
 #android.extra_manifest_application_xml = %(source.dir)s/src/android/extra_application.xml
 
+# (list) Put these files or directories in the apk res directory.
+android.add_resources = src/android/res
+
 # (str) Full name including package path of the Java class that implements Python Service
 # use that parameter to set custom Java class which extends PythonService
 #android.service_class_name = org.kivy.android.PythonService
@@ -157,18 +160,6 @@ android.extra_manifest_xml = %(source.dir)s/src/android/extra_manifest.xml
 # 1) android.add_assets = source_asset_relative_path
 # 2) android.add_assets = source_asset_path:destination_asset_relative_path
 #android.add_assets =
-
-# (list) Put these files or directories in the apk res directory.
-# The option may be used in three ways, the value may contain one or zero ':'
-# Some examples:
-# 1) A file to add to resources, legal resource names contain ['a-z','0-9','_']
-# android.add_resources = my_icons/all-inclusive.png:drawable/all_inclusive.png
-# 2) A directory, here  'legal_icons' must contain resources of one kind
-# android.add_resources = legal_icons:drawable
-# 3) A directory, here 'legal_resources' must contain one or more directories, 
-# each of a resource kind:  drawable, xml, etc...
-# android.add_resources = legal_resources
-#android.add_resources =
 
 # (list) Gradle dependencies to add
 android.gradle_dependencies = androidx.work:work-runtime:2.8.1, androidx.core:core:1.9.0
