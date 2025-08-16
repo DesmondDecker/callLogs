@@ -11,20 +11,22 @@ on:
 
 env:
   JAVA_VERSION: '17'
-  PYTHON_VERSION: '3.9'
-  ANDROID_API_LEVEL: '30'
-  ANDROID_BUILD_TOOLS_VERSION: '30.0.3'
-  NDK_VERSION: '23.2.8568313'
+  PYTHON_VERSION: '3.11'
+  ANDROID_API_LEVEL: '34'
+  ANDROID_BUILD_TOOLS_VERSION: '34.0.0'
+  NDK_VERSION: '25.2.9519653'
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 90
+    timeout-minutes: 120
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
+      with:
+        fetch-depth: 0
+        
     - name: Set up Python ${{ env.PYTHON_VERSION }}
       uses: actions/setup-python@v5
       with:
@@ -41,7 +43,7 @@ jobs:
       run: |
         sudo apt-get update -qq
         
-        # Install build dependencies
+        # Install essential build dependencies
         sudo apt-get install -y \
           build-essential \
           git \
@@ -51,7 +53,6 @@ jobs:
           autoconf \
           automake \
           libtool \
-          libtool-bin \
           pkg-config \
           gettext \
           zlib1g-dev \
@@ -70,7 +71,7 @@ jobs:
           zip \
           openjdk-${{ env.JAVA_VERSION }}-jdk
         
-        # Install media dependencies
+        # Install media dependencies for Kivy
         sudo apt-get install -y \
           ffmpeg \
           libsdl2-dev \
@@ -84,7 +85,45 @@ jobs:
           libfreetype6-dev \
           libgl1-mesa-dev \
           libgles2-mesa-dev \
-          libegl1-mesa-dev
+          libegl1-mesa-dev \
+          libdrm-dev \
+          libxkbcommon-dev \
+          libgbm-dev
+        
+    - name: Create required directories
+      run: |
+        # Create the src/android directories for manifest files
+        mkdir -p src/android/res/xml
+        
+        # Create the extra manifest XML file
+        cat > src/android/extra_manifest.xml << 'EOF'
+        <!-- Network Security Config -->
+        <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+        <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
+        <uses-feature android:name="android.hardware.camera" android:required="false" />
+        <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+        <application android:networkSecurityConfig="@xml/network_security_config" 
+                     android:usesCleartextTraffic="true"
+                     android:requestLegacyExternalStorage="true">
+        </application>
+        EOF
+        
+        # Create the network security config
+        cat > src/android/res/xml/network_security_config.xml << 'EOF'
+        <?xml version="1.0" encoding="utf-8"?>
+        <network-security-config>
+            <domain-config cleartextTrafficPermitted="true">
+                <domain includeSubdomains="true">kortahununited.onrender.com</domain>
+                <domain includeSubdomains="true">localhost</domain>
+                <domain includeSubdomains="true">127.0.0.1</domain>
+            </domain-config>
+            <base-config cleartextTrafficPermitted="false">
+                <trust-anchors>
+                    <certificates src="system"/>
+                </trust-anchors>
+            </base-config>
+        </network-security-config>
+        EOF
         
     - name: Setup Android SDK
       run: |
@@ -96,9 +135,9 @@ jobs:
         # Create SDK directory
         mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
         
-        # Download command-line tools
+        # Download command-line tools (latest version)
         cd "$ANDROID_SDK_ROOT/cmdline-tools"
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
         unzip -q cmdline-tools.zip
         mv cmdline-tools latest
         rm cmdline-tools.zip
@@ -112,7 +151,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/android-sdk
-        key: android-sdk-${{ env.ANDROID_API_LEVEL }}-${{ env.NDK_VERSION }}-v3
+        key: android-sdk-${{ env.ANDROID_API_LEVEL }}-${{ env.NDK_VERSION }}-v4
         restore-keys: |
           android-sdk-${{ env.ANDROID_API_LEVEL }}-
           android-sdk-
@@ -124,15 +163,15 @@ jobs:
         export JAVA_HOME=/usr/lib/jvm/java-${{ env.JAVA_VERSION }}-openjdk-amd64
         SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
         
-        # Accept licenses
+        # Accept licenses first
         yes | $SDKMANAGER --licenses > /dev/null 2>&1 || true
         
-        # Install SDK components
-        $SDKMANAGER "build-tools;${{ env.ANDROID_BUILD_TOOLS_VERSION }}" || true
-        $SDKMANAGER "platforms;android-${{ env.ANDROID_API_LEVEL }}" || true
-        $SDKMANAGER "platform-tools" || true
-        $SDKMANAGER "cmake;3.18.1" || true
-        $SDKMANAGER "ndk;${{ env.NDK_VERSION }}" || true
+        # Install essential SDK components
+        $SDKMANAGER "build-tools;${{ env.ANDROID_BUILD_TOOLS_VERSION }}"
+        $SDKMANAGER "platforms;android-${{ env.ANDROID_API_LEVEL }}"
+        $SDKMANAGER "platform-tools"
+        $SDKMANAGER "cmake;3.22.1"
+        $SDKMANAGER "ndk;${{ env.NDK_VERSION }}"
         
         # Set NDK environment
         export ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/${{ env.NDK_VERSION }}
@@ -143,9 +182,9 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}-${{ env.PYTHON_VERSION }}
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}-${{ env.PYTHON_VERSION }}-v2
         restore-keys: |
-          ${{ runner.os }}-pip-${{ env.PYTHON_VERSION }}-
+          ${{ runner.os }}-pip-${{ env.PYTHON_VERSION }}-v2-
           
     - name: Cache Buildozer directories
       uses: actions/cache@v4
@@ -153,16 +192,22 @@ jobs:
         path: |
           ~/.buildozer
           .buildozer
-        key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec', 'requirements.txt') }}-v3
+        key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec', 'requirements.txt') }}-v4
         restore-keys: |
-          ${{ runner.os }}-buildozer-v3-
+          ${{ runner.os }}-buildozer-v4-
           
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip setuptools wheel
+        
+        # Install buildozer and dependencies
+        pip install buildozer==1.5.0
+        pip install cython==0.29.36
+        
+        # Install app requirements
         pip install -r requirements.txt
         
-        # Verify installations
+        # Verify critical installations
         python -c "import kivy; print(f'Kivy version: {kivy.__version__}')"
         python -c "import kivymd; print(f'KivyMD version: {kivymd.__version__}')"
         python -c "import requests; print(f'Requests version: {requests.__version__}')"
@@ -191,12 +236,25 @@ jobs:
         echo "NDKAPI=21" >> $GITHUB_ENV
         echo "P4A_BOOTSTRAP=sdl2" >> $GITHUB_ENV
         
+        # Performance settings
+        echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
+        echo "USE_CCACHE=1" >> $GITHUB_ENV
+        
         # Verify environment
         echo "Environment verification:"
         echo "Java version: $(java -version 2>&1 | head -n 1)"
         echo "JAVA_HOME: $JAVA_HOME"
         echo "Python version: $(python --version)"
         echo "Buildozer version: $(buildozer version 2>/dev/null || echo 'Unknown')"
+        
+    - name: Initialize buildozer
+      run: |
+        # Clean any previous builds
+        rm -rf .buildozer/android/platform/
+        rm -rf bin/
+        
+        # Initialize buildozer (downloads dependencies)
+        buildozer android clean || echo "Clean failed (expected on first run)"
         
     - name: Build APK
       run: |
@@ -209,34 +267,51 @@ jobs:
         export ANDROIDNDK=$ANDROID_NDK_ROOT
         export ANDROIDAPI=${{ env.ANDROID_API_LEVEL }}
         export NDKAPI=21
+        export P4A_BOOTSTRAP=sdl2
+        export USE_CCACHE=1
         
-        # Clean previous builds
-        buildozer android clean || echo "Clean failed (expected on first run)"
+        # Build with comprehensive logging
+        timeout 110m buildozer -v android debug 2>&1 | tee build.log
+        BUILD_EXIT_CODE=${PIPESTATUS[0]}
         
-        # Build with timeout
-        timeout 75m buildozer -v android debug 2>&1 | tee build.log
-        BUILD_EXIT_CODE=$?
+        echo "Build completed with exit code: $BUILD_EXIT_CODE"
         
         if [ $BUILD_EXIT_CODE -eq 0 ]; then
-          echo "Build completed successfully!"
+          echo "✅ Build completed successfully!"
         elif [ $BUILD_EXIT_CODE -eq 124 ]; then
-          echo "Build timed out after 75 minutes"
-          tail -200 build.log
+          echo "❌ Build timed out after 110 minutes"
+          echo "Last 100 lines of build log:"
+          tail -100 build.log
           exit 1
         else
-          echo "Build failed with exit code: $BUILD_EXIT_CODE"
-          tail -200 build.log
+          echo "❌ Build failed with exit code: $BUILD_EXIT_CODE"
+          echo "Last 100 lines of build log:"
+          tail -100 build.log
           exit 1
         fi
         
-        # Find and copy APK
-        echo "Checking for generated APK..."
-        if find . -name "*.apk" -type f 2>/dev/null | head -1; then
-          APK_FILE=$(find . -name "*.apk" -type f | head -1)
+    - name: Find and verify APK
+      run: |
+        echo "Searching for generated APK files..."
+        
+        # Search for APK files
+        find . -name "*.apk" -type f 2>/dev/null | while read apk_file; do
+          if [ -f "$apk_file" ]; then
+            APK_SIZE=$(du -h "$apk_file" | cut -f1)
+            APK_NAME=$(basename "$apk_file")
+            echo "Found APK: $APK_NAME (Size: $APK_SIZE)"
+            echo "Full path: $apk_file"
+          fi
+        done
+        
+        # Get the main APK file
+        APK_FILE=$(find . -name "*.apk" -type f | head -1)
+        
+        if [ -n "$APK_FILE" ] && [ -f "$APK_FILE" ]; then
           APK_SIZE=$(du -h "$APK_FILE" | cut -f1)
           APK_NAME=$(basename "$APK_FILE")
           
-          echo "APK build successful!"
+          echo "✅ APK build successful!"
           echo "APK: $APK_NAME"
           echo "Size: $APK_SIZE"
           echo "Path: $APK_FILE"
@@ -246,12 +321,33 @@ jobs:
           cp "$APK_FILE" bin/
           echo "APK copied to bin/ directory"
           
+          # Verify APK file integrity
+          if [ -s "bin/$APK_NAME" ]; then
+            echo "✅ APK file verification successful"
+          else
+            echo "❌ APK file is empty or corrupted"
+            exit 1
+          fi
+          
           ls -la bin/
         else
-          echo "No APK found after build"
-          find . -name "*.apk" -type f 2>/dev/null || echo "No APK files found"
+          echo "❌ No APK found after build"
+          echo "Contents of current directory:"
+          find . -type f -name "*.apk" 2>/dev/null || echo "No APK files found anywhere"
+          echo "Contents of .buildozer directory:"
+          find .buildozer -type f -name "*.apk" 2>/dev/null || echo "No APK files in .buildozer"
           exit 1
         fi
+        
+    - name: Upload build logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs-${{ github.sha }}
+        path: |
+          build.log
+          .buildozer/android/platform/build-*/outputs/logs/**/*
+        retention-days: 7
         
     - name: Upload build artifacts
       if: always()
@@ -259,7 +355,6 @@ jobs:
       with:
         name: build-artifacts-${{ github.sha }}
         path: |
-          build.log
           bin/*.apk
           .buildozer/android/platform/build-*/outputs/apk/**/*.apk
         retention-days: 7
@@ -268,49 +363,95 @@ jobs:
       if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: kortahun-united-apk-v2.0.0-${{ github.sha }}
+        name: kortahun-united-apk-v2.1.0-${{ github.sha }}
         path: bin/*.apk
         retention-days: 30
         
+    - name: Create release assets
+      if: github.event_name == 'release' && success()
+      run: |
+        # Rename APK with version info
+        cd bin/
+        for apk in *.apk; do
+          if [ -f "$apk" ]; then
+            mv "$apk" "kortahun-united-v${{ github.ref_name }}-${apk}"
+          fi
+        done
+        ls -la
+        
     - name: Upload to release
       if: github.event_name == 'release' && success()
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         files: bin/*.apk
         name: "Kortahun United v${{ github.ref_name }}"
         body: |
-          ## Kortahun United Android App v${{ github.ref_name }}
+          ## 📱 Kortahun United Android App v${{ github.ref_name }}
           
-          ### Build Information
+          ### 🔧 Build Information
           - **Version:** ${{ github.ref_name }}
           - **Build:** ${{ github.sha }}
           - **Platform:** Android (API ${{ env.ANDROID_API_LEVEL }}+)
           - **Architecture:** arm64-v8a, armeabi-v7a
+          - **Built with:** Buildozer, Python ${{ env.PYTHON_VERSION }}, Java ${{ env.JAVA_VERSION }}
           
-          ### Key Features
-          - Real-time Call Log Tracking
-          - Automatic Sync every 2 minutes
-          - Instant new call detection
-          - QR Code device registration
-          - Enhanced UI with real-time updates
-          - Secure backend synchronization
-          - Comprehensive sync statistics
+          ### ✨ Key Features
+          - **Real-time Call Log Tracking** - Automatic detection and sync
+          - **QR Code Registration** - Easy device setup via mobile browser
+          - **Auto Sync** - Configurable sync intervals (default: 5 minutes)
+          - **Enhanced UI** - Material Design with KivyMD
+          - **Secure Backend** - HTTPS communication with Kortahun United server
+          - **Comprehensive Logging** - Detailed sync statistics and error reporting
+          - **Permission Management** - Smart Android permission handling
+          - **Multi-device Support** - Register multiple devices per account
           
-          ### System Requirements
+          ### 📋 System Requirements
           - **Android:** 5.0+ (API 21+)
           - **RAM:** 2GB+ recommended
           - **Storage:** 50MB+ free space
+          - **Network:** Internet connection required for sync
           - **Permissions:** Call log, Phone, Storage, Camera, Internet
           
-          ### Installation
-          1. Download the APK file
-          2. Enable "Install from unknown sources"
-          3. Install the APK file
-          4. Grant required permissions
-          5. Register device using QR code
+          ### 🚀 Installation Instructions
+          1. **Download** the APK file from this release
+          2. **Enable** "Install from unknown sources" in Android settings
+          3. **Install** the APK file on your Android device
+          4. **Launch** the app and grant required permissions
+          5. **Register** your device using the QR code feature
+          6. **Start** automatic call log synchronization
+          
+          ### 🔧 Setup Process
+          1. Open the app and tap **"Register"** → **"Generate QR Code"**
+          2. Scan the QR code with your mobile browser
+          3. Complete registration on the web interface
+          4. Grant call log permissions when prompted
+          5. Call logs will automatically sync every 5 minutes
+          
+          ### 🆕 What's New in v${{ github.ref_name }}
+          - ✅ **Updated Backend Integration** - Uses existing server endpoints
+          - ✅ **QR Code Registration** - Visual QR display in app
+          - ✅ **Auto Registration Wait** - Automatically detects when device is registered
+          - ✅ **Enhanced Error Handling** - Better user feedback and recovery
+          - ✅ **Improved UI** - Modern Material Design interface
+          - ✅ **Settings Screen** - Configure sync intervals and server settings
+          - ✅ **Heartbeat System** - Regular status updates to server
+          - ✅ **Network Security** - Proper HTTPS/HTTP handling
+          
+          ### 🛟 Support & Troubleshooting
+          - **Permissions**: If call logs aren't syncing, check app permissions
+          - **Registration**: Use QR code method for most reliable setup
+          - **Sync Issues**: Check internet connection and server status
+          - **Battery**: Add app to battery optimization whitelist
+          
+          ### 🔗 Backend Endpoints Used
+          - `GET /api/health` - Connection testing
+          - `GET /api/devices/generate-link/:deviceId` - QR generation
+          - `GET /api/devices/device/:deviceId` - Device status
+          - `POST /api/devices/device/:deviceId/heartbeat` - Status updates
+          - `POST /api/calls/sync/:deviceId` - Call synchronization
           
           ---
           
-          **Note:** This app requires call log permissions to function properly.
+          **⚠️ Important:** This app requires call log permissions to function properly. The app is designed to work with the Kortahun United backend system.
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
