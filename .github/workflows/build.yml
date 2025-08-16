@@ -239,8 +239,10 @@ jobs:
         echo "NDKAPI=21" >> $GITHUB_ENV
         echo "P4A_BOOTSTRAP=sdl2" >> $GITHUB_ENV
         
-        # Cython settings to fix compilation warnings/errors
+        # Cython settings to fix compilation warnings/errors - FIXED VERSION
         echo "CYTHON_FORCE_REGEN=1" >> $GITHUB_ENV
+        echo "CYTHON_LANGUAGE_LEVEL=3" >> $GITHUB_ENV
+        echo "CYTHON_COMPILER_DIRECTIVES=language_level=3" >> $GITHUB_ENV
         echo "PYTHONDONTWRITEBYTECODE=1" >> $GITHUB_ENV
         
         # Performance settings
@@ -277,10 +279,12 @@ jobs:
         export P4A_BOOTSTRAP=sdl2
         export USE_CCACHE=1
         export CYTHON_FORCE_REGEN=1
+        export CYTHON_LANGUAGE_LEVEL=3
         export PYTHONDONTWRITEBYTECODE=1
         
-        # Filter out problematic Python test files that cause unicode errors
-        export P4A_EXCLUDE_DIRS="test,tests,testing,__pycache__,.pytest_cache,badsyntax"
+        # ENHANCED: Filter out problematic Python test files and Cython issues
+        export P4A_EXCLUDE_DIRS="test,tests,testing,__pycache__,.pytest_cache,badsyntax,test_*"
+        export P4A_EXCLUDE_EXTS="pyc,pyo"
         
         # Build with comprehensive logging, filtering out Cython warnings
         timeout 110m buildozer -v android debug 2>&1 | tee build.log
@@ -306,13 +310,15 @@ jobs:
       run: |
         echo "Searching for generated APK files..."
         
-        # Search for APK files
+        # Create bin directory
+        mkdir -p bin/
+        
+        # Find and process APK files - FIXED VERSION
         find . -name "*.apk" -type f 2>/dev/null | while read apk_file; do
           if [ -f "$apk_file" ]; then
             APK_SIZE=$(du -h "$apk_file" | cut -f1)
             APK_NAME=$(basename "$apk_file")
-            echo "Found APK: $APK_NAME (Size: $APK_SIZE)"
-            echo "Full path: $apk_file"
+            echo "Found APK: $APK_NAME (Size: $APK_SIZE) at: $apk_file"
           fi
         done
         
@@ -328,27 +334,31 @@ jobs:
           echo "Size: $APK_SIZE"
           echo "Path: $APK_FILE"
           
-          # Create bin directory and copy APK only if different
-          mkdir -p bin/
+          # FIXED: Handle APK placement correctly
           DEST_PATH="bin/$APK_NAME"
           
-          # Only copy if source and destination are different
-          if [ "$APK_FILE" != "$DEST_PATH" ]; then
-            cp "$APK_FILE" "$DEST_PATH"
-            echo "APK copied to bin/ directory"
+          # Use realpath to resolve any path issues
+          REAL_APK_PATH=$(realpath "$APK_FILE" 2>/dev/null || echo "$APK_FILE")
+          REAL_DEST_PATH=$(realpath "$DEST_PATH" 2>/dev/null || echo "$DEST_PATH")
+          
+          # Only move if they are actually different files
+          if [ "$REAL_APK_PATH" != "$REAL_DEST_PATH" ]; then
+            mv "$APK_FILE" "$DEST_PATH"
+            echo "APK moved to bin/ directory: $DEST_PATH"
           else
-            echo "APK already in correct location"
+            echo "APK already in correct location: $APK_FILE"
           fi
           
-          # Verify APK file integrity
-          if [ -s "$DEST_PATH" ]; then
-            echo "✅ APK file verification successful"
+          # Verify final APK
+          FINAL_APK="$DEST_PATH"
+          if [ -s "$FINAL_APK" ]; then
+            echo "✅ Final APK verification successful"
+            ls -la bin/
           else
-            echo "❌ APK file is empty or corrupted"
+            echo "❌ Final APK is missing or empty"
             exit 1
           fi
           
-          ls -la bin/
         else
           echo "❌ No APK found after build"
           echo "Contents of current directory:"
