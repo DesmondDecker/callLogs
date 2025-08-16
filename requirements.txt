@@ -28,4 +28,4 @@ setuptools==69.0.3
 wheel==0.42.0
 
 # Security updates (compatible versions)
-cryptography==41.0.8
+cryptography==41.0.7  
